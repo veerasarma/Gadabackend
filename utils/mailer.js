@@ -33,13 +33,19 @@ transporter.use('compile', hbs(handlebarOptions));
 
 // Send Email Function
 const sendEmail = async (to, subject, templateName, context) => {
-  await transporter.sendMail({
+  const info = await transporter.sendMail({
     from: `"${process.env.SYSTEM_NAME}" <${process.env.SMTP_USER}>`,
     to,
     subject,
     template: templateName,
     context
   });
+  console.log('[mail] response:', info.response);
+  console.log('[mail] messageId:', info.messageId);
+  console.log('[mail] accepted:', info.accepted);
+  console.log('[mail] rejected:', info.rejected);
+  console.log('[mail] pending:', info.pending);
+
 };
 
 module.exports = {
