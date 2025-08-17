@@ -1,0 +1,45 @@
+<!-- templates/emails/activation_email.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>{{template_subject}}</title>
+  <style>/* Keep your CSS as-is */</style>
+</head>
+<body>
+  <table class="body">
+    <tr>
+      <td></td>
+      <td class="container">
+        <div class="content">
+          <table class="main">
+            <tr>
+              <td class="wrapper">
+                <table>
+                  <tr>
+                    <td>
+                      <p>Hi {{name}},</p>
+                      <p>
+                        To complete the activation process, please follow this link:<br>
+                        <a href="{{system.system_url}}/activation/{{email_verification_code}}">
+                          {{system.system_url}}/activation/{{email_verification_code}}
+                        </a>
+                      </p>
+                      <p>Activation Code: <strong>{{email_verification_code}}</strong></p>
+                      <p>Welcome to {{system.system_title}}</p>
+                      <p>{{system.system_title}} Team</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </div>
+      </td>
+      <td></td>
+    </tr>
+  </table>
+</body>
+</html>
+
+

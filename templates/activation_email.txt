@@ -1,0 +1,10 @@
+Hi {{name}},
+
+To complete the activation process, please follow this link:
+{{system.system_url}}/activation/{{email_verification_code}}
+
+Activation Code: {{email_verification_code}}
+
+Welcome to {{system.system_title}}
+
+{{system.system_title}} Team
