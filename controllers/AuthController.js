@@ -85,7 +85,7 @@ exports.signUp = async (req, res, next) => {
       //   console.log("after mail tesmpl")
       //   await sendEmail(args.email, subject, body.html, body.plain);
       console.log(system.system_url, "system.system_url");
-      console.log(system.system_title, "system.system_title");
+      console.log(args.email, "args.email");
 
       await sendEmail(args.email, subject, "activation_email", {
         name,
