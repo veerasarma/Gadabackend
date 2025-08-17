@@ -70,6 +70,34 @@ exports.activation = async (req, res, next) => {
 };
 
 exports.signUp = async (req, res, next) => {
+  const system = req.system;
+  const date = getDateTime();
+  const args = req.body;
+  const device_info = args.device_info || {};
+  const fromWeb = args.from_web ?? true;
+  const email_verification_code = '123456'
+  const subject = `Just one more step to get started on ${system.system_title}`;
+      const name = system.show_usernames_enabled
+        ? args.username
+        : `${args.firstname} ${args.lastname}`;
+      //   console.log("before mail tesmpl")
+      //   const body = getEmailTemplate('activation_email', subject, { name, email_verification_code });
+      //   console.log("after mail tesmpl")
+      //   await sendEmail(args.email, subject, body.html, body.plain);
+      console.log(system.system_url, "system.system_url");
+      console.log(system.system_title, "system.system_title");
+
+      await sendEmail(args.email, subject, "activation_email", {
+        name,
+        email_verification_code,
+        system: {
+          system_url: system.system_url,
+          system_title: system.system_title,
+        },
+      });
+      console.log("after send mail ");
+
+      return false;
   try {
     const system = req.system;
     const date = getDateTime();
