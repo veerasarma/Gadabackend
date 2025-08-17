@@ -7,17 +7,7 @@ const cors = require('cors');
 const path = require('path');
 const http = require('node:http');
 
-const fallback = process.env.NODE_ENV === 'production' ? '.env-prod' : '.env';
-const envPath = process.env.DOTENV_CONFIG_PATH
-  ? path.resolve(process.cwd(), process.env.DOTENV_CONFIG_PATH)
-  : path.resolve(process.cwd(), fallback);
-
-// Load .env
-require('dotenv').config({ path: envPath });
-
-// Optional: verify
-console.log('[env] NODE_ENV=', process.env.NODE_ENV);
-console.log('[env] DOTENV @', envPath, fs.existsSync(envPath) ? '✅' : '❌');
+require('dotenv').config();
 
 const initRoute = require('./routes/init.route');
 const authRoutes = require('./routes/authRoutes');
