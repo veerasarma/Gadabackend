@@ -32,6 +32,10 @@ const adminCommentsRoutes = require('./routes/adminComments');
 const { initSystemConfig } = require('./config/systemLoader');
 const initSystem = require('./middlewares/attachSystem');
 const { initSocket } = require('./socket');
+const pointsRoutes =  require('./routes/points');
+const representativesRoutes = require('./routes/representatives');
+
+
 
 const app = express();
 
@@ -109,11 +113,13 @@ app.use("/api/packages", packagesRoutes);
 app.use('/api/reels', require('./routes/reels'));
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/points', pointsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/settings', adminSettingsRoutes);
 app.use('/api/admin/profile', adminProfileRoutes);
 app.use('/api/admin/posts', adminPostsRoutes);
 app.use('/api/admin/comments', adminCommentsRoutes);
+app.use('/api/representatives', representativesRoutes);
 app.use('/api', initRoute);
 app.use('/api', authRoutes);
 

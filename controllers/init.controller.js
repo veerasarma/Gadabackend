@@ -2,13 +2,12 @@ exports.getInitialData = async (req, res) => {
     try {
       const system = req.system || {};
       const userInstance = req.userInstance;
-  
       const response = {
         system,
         user: null,
         controlPanel: null,
       };
-      
+
       if (userInstance && userInstance._logged_in) {
         // Check user ban
         if (userInstance._is_banned) {

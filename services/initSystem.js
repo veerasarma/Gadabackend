@@ -17,7 +17,6 @@ async function initSystem() {
 
 
   // You can include theme, language, currency, etc. here as needed
-
   return system;
 }
 

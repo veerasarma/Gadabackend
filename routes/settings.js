@@ -213,7 +213,7 @@ router.put(
       await pool.query('UPDATE users SET user_password=? WHERE user_id=?', [newHash, uid]);
 
       // OPTIONAL: revoke other sessions (keep current)
-      await pool.query('DELETE FROM user_sessions WHERE user_id=? AND id<>?', [uid, req.sessionId ?? '']);
+      await pool.query('DELETE FROM users_sessions WHERE user_id=? AND session_id<>?', [uid, req.sessionId ?? '']);
 
       res.json({ ok: true });
     } catch (e) { next(e); console.log(e,';ee') }
@@ -225,11 +225,11 @@ router.get('/security/sessions', ensureAuth, async (req, res, next) => {
     try {
       const uid = req.user.userId;
       const [rows] = await pool.query(
-        `SELECT id, user_agent AS userAgent, ip,
-                created_at AS createdAt, last_seen AS lastSeen
-           FROM user_sessions
+        `SELECT session_id, user_browser AS userAgent, user_ip AS ip,
+                session_date AS createdAt, user_browser, user_os, user_os_version
+           FROM users_sessions
           WHERE user_id = ?
-       ORDER BY (last_seen IS NULL) ASC, last_seen DESC, created_at DESC`,
+       ORDER BY session_date DESC`,
         [uid]
       );
       res.json(rows);
@@ -240,7 +240,7 @@ router.delete('/security/sessions/:id', ensureAuth, async (req, res, next) => {
   try {
     const uid = req.user.userId;
     const sid = req.params.id;
-    await pool.query('DELETE FROM user_sessions WHERE id=? AND user_id=?', [sid, uid]);
+    await pool.query('DELETE FROM users_sessions WHERE session_id=? AND user_id=?', [sid, uid]);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

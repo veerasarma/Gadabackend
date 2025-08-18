@@ -167,6 +167,32 @@ router.get(
   }
 );
 
+router.get(
+  '/fetchuserbalance', ensureAuth,
+  async (req, res) => {
+    let userId;
+    userId = req.user.userId
+    try {
+      // 2) Fetch user
+      const [rows] = await pool.query(
+        `SELECT 
+         user_wallet_balance,user_points
+         FROM users
+         WHERE user_id = ?`,
+        [userId]
+      );
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      // 3) Return
+      res.json(rows[0]);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Server error fetching profile' });
+    }
+  }
+);
+
 // GET /api/users/:id
 router.get(
   '/:hash',
