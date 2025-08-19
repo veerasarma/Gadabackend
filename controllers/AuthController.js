@@ -77,6 +77,9 @@ exports.signUp = async (req, res, next) => {
   const fromWeb = args.from_web ?? true;
   const email_verification_code = '123456'
   const subject = `Just one more step to get started on ${system.system_title}`;
+  const mailheader = {
+    "List-Unsubscribe": `<mailto:unsubscribe@gada.chat>, <${system.system_url}/unsubscribe?email=${args.email}>`
+  }
       const name = system.show_usernames_enabled
         ? args.username
         : `${args.firstname} ${args.lastname}`;
@@ -87,7 +90,7 @@ exports.signUp = async (req, res, next) => {
       console.log(system.system_url, "system.system_url");
       console.log(args.email, "args.email");
 
-      await sendEmail(args.email, subject, "activation_email", {
+      await sendEmail(args.email,mailheader, subject, "activation_email", {
         name,
         email_verification_code,
         system: {
@@ -237,7 +240,12 @@ exports.signUp = async (req, res, next) => {
       console.log(system.system_url, "system.system_url");
       console.log(system.system_title, "system.system_title");
 
-      await sendEmail(args.email, subject, "activation_email", {
+      
+      const mailheader = {
+        "List-Unsubscribe": `<mailto:unsubscribe@gada.chat>, <${system.system_url}/unsubscribe?email=${args.email}>`
+      }
+
+      await sendEmail(args.email, mailheader, subject, "activation_email", {
         name,
         email_verification_code,
         system: {
@@ -855,8 +863,11 @@ exports.sendOtp = async (req, res, next) => {
     const name = system.show_usernames_enabled
       ? user.user_name
       : `${user.user_firstname} ${user.user_lastname}`;
+      const mailheader = {
+        "List-Unsubscribe": `<mailto:unsubscribe@gada.chat>, <${system.system_url}/unsubscribe?email=${email}>`
+      }
 
-    await sendEmail(email, subject, "send_forgot_otp", {
+    await sendEmail(email, mailheader,subject, "send_forgot_otp", {
       name,
       otp,
       system: {

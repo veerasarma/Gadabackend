@@ -32,13 +32,14 @@ const handlebarOptions = {
 transporter.use('compile', hbs(handlebarOptions));
 
 // Send Email Function
-const sendEmail = async (to, subject, templateName, context) => {
+const sendEmail = async (to, mailheader,subject,  templateName, context) => {
   const info = await transporter.sendMail({
     from: `"${process.env.SYSTEM_NAME}" <${process.env.SMTP_USER}>`,
     to,
     subject,
     template: templateName,
-    context
+    context,
+    headers: mailheader
   });
   console.log('[mail] response:', info.response);
   console.log('[mail] messageId:', info.messageId);
