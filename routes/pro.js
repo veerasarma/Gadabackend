@@ -21,7 +21,7 @@ router.get('/users', ensureAuth, async (req, res) => {
       SELECT 
         u.user_id            AS id,
         u.user_name          AS name,
-        COALESCE(u.user_picture, '/uploads/profile/defaultavatar.png') AS avatar,
+        COALESCE(u.user_picture, '/uploads//profile/defaultavatar.png') AS avatar,
         pp.package_name      AS packageName,
         pp.payment_date      AS paidAt
       FROM users u
