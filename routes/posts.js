@@ -214,18 +214,33 @@ router.get('/:id',
   }
 );
 
-// POST /api/posts  (create a post)
-router.post('/',
+// text -> ['tag1','tag2',...]
+function extractHashtags(text) {
+  if (!text) return [];
+  // Unicode letters/numbers/underscore; up to 256 chars total (matches varchar(256))
+  const re = /#([\p{L}\p{N}_]{1,256})/gu;
+  const found = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const tag = m[1].toLowerCase(); // normalize case
+    if (tag) found.push(tag);
+  }
+  return Array.from(new Set(found)); // unique
+}
+
+router.post(
+  '/',
   ensureAuth,
   body('content').optional({ nullable: true }).isString(),
   body('media').isArray().optional(),
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-    console.log(req.body,'req.bodyreq.bodyreq.bodyreq.body')
+    if (!errors.isEmpty())
+      return res.status(400).json({ errors: errors.array() });
+
     const { userId, content, media = [] } = req.body;
 
-    // sanity: only author can create for themselves (unless you support page/user_type etc)
+    // only author can create for themselves
     if (String(userId) !== String(req.user.userId)) {
       return res.status(403).json({ error: 'Forbidden' });
     }
@@ -234,7 +249,7 @@ router.post('/',
     try {
       await conn.beginTransaction();
 
-      // Insert post
+      // 1) Insert post
       const [r] = await conn.execute(
         `INSERT INTO posts
            (user_id, user_type, post_type, time, privacy, text, is_hidden, in_group, in_event, in_wall,
@@ -244,7 +259,7 @@ router.post('/',
       );
       const postId = r.insertId;
 
-      // Attach media
+      // 2) Attach media (images/videos)
       for (const m of media) {
         if (!m?.url || !m?.type) continue;
         if (m.type === 'image') {
@@ -262,24 +277,91 @@ router.post('/',
         }
       }
 
-      // Fetch enriched post (reuse detail logic quickly)
-      const [[post]] = await conn.query(`
-        SELECT p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
-               u.user_name AS authorUsername,
-               u.user_picture AS authorProfileImage
-          FROM posts p
-          JOIN users u ON u.user_id = p.user_id
-         WHERE p.post_id = ?`, [postId]);
+      // 3) Hashtags: extract from content, upsert, link to post
+      const tags = extractHashtags(content);
+      if (tags.length) {
+        // 3a) Fetch existing hashtags
+        const placeholders = tags.map(() => '?').join(',');
+        const [existingRows] = await conn.query(
+          `SELECT hashtag_id, hashtag FROM hashtags WHERE hashtag IN (${placeholders})`,
+          tags
+        );
+        const existing = new Map();
+        existingRows.forEach(row => {
+          existing.set(String(row.hashtag).toLowerCase(), row.hashtag_id);
+        });
+
+        // 3b) Insert new hashtags if needed
+        const toInsert = tags.filter(t => !existing.has(t));
+        if (toInsert.length) {
+          await conn.query(
+            `INSERT INTO hashtags (hashtag) VALUES ${toInsert.map(() => '(?)').join(',')}`,
+            toInsert
+          );
+          // Reselect all ids (both existing + new)
+          const [afterIns] = await conn.query(
+            `SELECT hashtag_id, hashtag FROM hashtags WHERE hashtag IN (${placeholders})`,
+            tags
+          );
+          afterIns.forEach(row => {
+            existing.set(String(row.hashtag).toLowerCase(), row.hashtag_id);
+          });
+        }
+
+        // 3c) Link hashtags to this post (idempotent)
+        const hashtagIds = tags
+          .map(t => existing.get(t))
+          .filter(id => Number.isInteger(id));
+
+        if (hashtagIds.length) {
+          const valuesSql = hashtagIds.map(() => '(?, ?, NOW())').join(',');
+          const params = [];
+          hashtagIds.forEach(hid => {
+            params.push(postId, hid);
+          });
+
+          // relies on UNIQUE(post_id, hashtag_id) in hashtags_posts
+          await conn.query(
+            `INSERT IGNORE INTO hashtags_posts (post_id, hashtag_id, created_at)
+             VALUES ${valuesSql}`,
+            params
+          );
+        }
+      }
+
+      // 4) Fetch enriched post to return (use full name as authorUsername)
+      const [rows] = await conn.query(
+        `SELECT
+           p.post_id,
+           p.user_id,
+           p.text,
+           p.time,
+           p.privacy,
+           p.shares,
+           IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+           u.user_picture AS authorProfileImage
+         FROM posts p
+         JOIN users u ON u.user_id = p.user_id
+         WHERE p.post_id = ?`,
+        [postId]
+      );
+      const post = rows[0];
 
       const out = mapPostRow(post);
+
       const [imgs] = await conn.query(
-        `SELECT source_url FROM posts_media WHERE post_id=? AND source_type='image'`, [postId]
+        `SELECT source_url FROM posts_media WHERE post_id=? AND source_type='image'`,
+        [postId]
       );
       out.images = imgs.map(i => i.source_url);
+
       const [vids] = await conn.query(
-        `SELECT source FROM posts_videos WHERE post_id=?`, [postId]
+        `SELECT source FROM posts_videos WHERE post_id=?`,
+        [postId]
       );
       out.videos = vids.map(v => v.source);
+
+      if (tags && tags.length) out.hashtags = tags;
 
       await conn.commit();
       res.status(201).json(out);
@@ -292,6 +374,85 @@ router.post('/',
     }
   }
 );
+
+// // POST /api/posts  (create a post)
+// router.post('/',
+//   ensureAuth,
+//   body('content').optional({ nullable: true }).isString(),
+//   body('media').isArray().optional(),
+//   async (req, res) => {
+//     const errors = validationResult(req);
+//     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+//     console.log(req.body,'req.bodyreq.bodyreq.bodyreq.body')
+//     const { userId, content, media = [] } = req.body;
+
+//     // sanity: only author can create for themselves (unless you support page/user_type etc)
+//     if (String(userId) !== String(req.user.userId)) {
+//       return res.status(403).json({ error: 'Forbidden' });
+//     }
+
+//     const conn = await pool.promise().getConnection();
+//     try {
+//       await conn.beginTransaction();
+
+//       // Insert post
+//       const [r] = await conn.execute(
+//         `INSERT INTO posts
+//            (user_id, user_type, post_type, time, privacy, text, is_hidden, in_group, in_event, in_wall,
+//             reaction_like_count, comments, shares)
+//          VALUES (?, 'user', 'status', NOW(), 'public', ?, '0', '0', '0', '0', 0, 0, 0)`,
+//         [userId, content || null]
+//       );
+//       const postId = r.insertId;
+
+//       // Attach media
+//       for (const m of media) {
+//         if (!m?.url || !m?.type) continue;
+//         if (m.type === 'image') {
+//           await conn.execute(
+//             `INSERT INTO posts_media (post_id, source_url, source_provider, source_type)
+//              VALUES (?, ?, 'upload', 'image')`,
+//             [postId, m.url]
+//           );
+//         } else if (m.type === 'video') {
+//           await conn.execute(
+//             `INSERT INTO posts_videos (post_id, category_id, source)
+//              VALUES (?, 1, ?)`,
+//             [postId, m.url]
+//           );
+//         }
+//       }
+
+//       // Fetch enriched post (reuse detail logic quickly)
+//       const [[post]] = await conn.query(`
+//         SELECT p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+//                u.user_name AS authorUsername,
+//                u.user_picture AS authorProfileImage
+//           FROM posts p
+//           JOIN users u ON u.user_id = p.user_id
+//          WHERE p.post_id = ?`, [postId]);
+
+//       const out = mapPostRow(post);
+//       const [imgs] = await conn.query(
+//         `SELECT source_url FROM posts_media WHERE post_id=? AND source_type='image'`, [postId]
+//       );
+//       out.images = imgs.map(i => i.source_url);
+//       const [vids] = await conn.query(
+//         `SELECT source FROM posts_videos WHERE post_id=?`, [postId]
+//       );
+//       out.videos = vids.map(v => v.source);
+
+//       await conn.commit();
+//       res.status(201).json(out);
+//     } catch (err) {
+//       await conn.rollback();
+//       console.error('[POST /posts] ', err);
+//       res.status(500).json({ error: 'Failed to create post' });
+//     } finally {
+//       conn.release();
+//     }
+//   }
+// );
 
 // POST /api/posts/:id/react  (toggle like)
 router.post('/:id/react',
