@@ -34,6 +34,7 @@ const initSystem = require('./middlewares/attachSystem');
 const { initSocket } = require('./socket');
 const pointsRoutes =  require('./routes/points');
 const representativesRoutes = require('./routes/representatives');
+const proRoutes = require('./routes/pro');
 
 
 
@@ -120,6 +121,7 @@ app.use('/api/admin/profile', adminProfileRoutes);
 app.use('/api/admin/posts', adminPostsRoutes);
 app.use('/api/admin/comments', adminCommentsRoutes);
 app.use('/api/representatives', representativesRoutes);
+app.use('/api/pro', proRoutes);
 app.use('/api', initRoute);
 app.use('/api', authRoutes);
 

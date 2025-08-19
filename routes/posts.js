@@ -31,15 +31,27 @@ function mapPostRow(p) {
 router.get('/', ensureAuth, async (req, res) => {
   try {
     // 1) fetch recent posts with author
+    // const [posts] = await pool.promise().query(`
+    //   SELECT p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+    //          u.user_name   AS authorUsername,
+    //          u.user_picture AS authorProfileImage
+    //     FROM posts p
+    //     JOIN users u ON u.user_id = p.user_id
+    //    WHERE p.is_hidden = '0'
+    //    ORDER BY p.time DESC
+    //    LIMIT 100
+    // `);
+   
     const [posts] = await pool.promise().query(`
-      SELECT p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
-             u.user_name   AS authorUsername,
-             u.user_picture AS authorProfileImage
+        SELECT
+        p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+        IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+        u.user_picture AS authorProfileImage
         FROM posts p
         JOIN users u ON u.user_id = p.user_id
-       WHERE p.is_hidden = '0'
-       ORDER BY p.time DESC
-       LIMIT 100
+        WHERE p.is_hidden = '0'
+        ORDER BY p.time DESC
+        LIMIT 100;
     `);
 
     if (!posts.length) return res.json([]);
