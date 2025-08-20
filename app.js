@@ -36,6 +36,7 @@ const { initSocket } = require("./socket");
 const pointsRoutes = require("./routes/points");
 const representativesRoutes = require("./routes/representatives");
 const proRoutes = require("./routes/pro");
+const postViewsRoutes = require("./routes/postViews");
 
 const app = express();
 
@@ -125,6 +126,7 @@ app.use("/api/representatives", representativesRoutes);
 app.use("/api/pro", proRoutes);
 app.use("/api", initRoute);
 app.use("/api", authRoutes);
+app.use("/api/postsviews", postViewsRoutes);
 
 app.get("/", (_req, res) => res.send("API is running"));
 

@@ -43,7 +43,7 @@ router.get('/testing', async (req, res, next)=> {
    const out = await creditPoints({
         userId: userId,
         nodeId: postId,
-        type: 'post',               // or 'post_create'
+        type: 'post_comment',               // or 'post_create'
         req,                        // so it can read req.system
         checkActivePackage,         // your existing fn
     });

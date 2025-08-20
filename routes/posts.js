@@ -4,6 +4,7 @@ const { pool } = require('../config/db');
 const { ensureAuth } = require('../middlewares/auth');
 const { createNotification } = require('../services/notificationService');
 const { checkActivePackage } = require("../services/packageService");
+const { creditPoints } = require('../utils/points');
 
 const router = express.Router();
 
@@ -363,15 +364,13 @@ router.post(
       out.videos = vids.map(v => v.source);
 
       //Earning points section for post create 
-
-      const { creditPoints } = require('../utils/points');
      
       const out1 = await creditPoints({
-      userId: userId,
-      nodeId: postId,
-      type: 'post',               // or 'post_create'
-      req,                        // so it can read req.system
-      checkActivePackage,         // your existing fn
+        userId: userId,
+        nodeId: postId,
+        type: 'post',               // or 'post_create'
+        req,                        // so it can read req.system
+        checkActivePackage,         // your existing fn
       });
       console.log(out1,'out1out1out1out1')
 
@@ -535,6 +534,19 @@ router.post('/:id/react',
               console.error('[notif] post_like helper failed', err)
             );
           } 
+
+            //Earning points section for post create 
+            const out1 = await creditPoints({
+            userId: authorId,
+            nodeId: id,
+            type: 'posts_reactions',               // or 'post_create'
+            req,                        // so it can read req.system
+            checkActivePackage,         // your existing fn
+            });
+            console.log(out1,'out1out1out1out1')
+          
+ 
+       // Earning points section for post create
         }
 
         await conn.commit();
@@ -604,7 +616,8 @@ router.post('/:id/comment',
           entityId: postId,
           meta: { postId },
         };
-  
+        
+        
         if (createNotification) {
           // Use your service (emits socket + returns enriched row)
           createNotification(payload).catch(err =>
@@ -612,6 +625,21 @@ router.post('/:id/comment',
           );
         } 
       }
+      
+      //Earning points section for post create 
+      
+      if (authorId && authorId !== userId) {
+       const out1 = await creditPoints({
+        userId: authorId,
+        nodeId: insertedId,
+        type: 'post_comment',               // or 'post_create'
+        req,                        // so it can read req.system
+        checkActivePackage,         // your existing fn
+      });
+      console.log(out1,'out1out1out1out1')
+    }
+
+      // Earning points section for post create
 
       await conn.commit();
 
