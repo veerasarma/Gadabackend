@@ -36,6 +36,19 @@ function prettyFrom(nodeType) {
   }
 }
 
+router.get('/testing', async (req, res, next)=> {
+    const { creditPoints } = require('../utils/points');
+    const userId = 9008;
+    const postId = 359865;
+   const out = await creditPoints({
+        userId: userId,
+        nodeId: postId,
+        type: 'post',               // or 'post_create'
+        req,                        // so it can read req.system
+        checkActivePackage,         // your existing fn
+    });
+    res.json(out)
+});
 /**
  * GET /api/points/overview
  * Returns points rules (from system config), current balances and remaining daily points.

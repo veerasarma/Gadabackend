@@ -3,6 +3,7 @@ const { body, validationResult, param } = require('express-validator');
 const { pool } = require('../config/db');
 const { ensureAuth } = require('../middlewares/auth');
 const { createNotification } = require('../services/notificationService');
+const { checkActivePackage } = require("../services/packageService");
 
 const router = express.Router();
 
@@ -360,6 +361,21 @@ router.post(
         [postId]
       );
       out.videos = vids.map(v => v.source);
+
+      //Earning points section for post create 
+
+      const { creditPoints } = require('../utils/points');
+     
+      const out1 = await creditPoints({
+      userId: userId,
+      nodeId: postId,
+      type: 'post',               // or 'post_create'
+      req,                        // so it can read req.system
+      checkActivePackage,         // your existing fn
+      });
+      console.log(out1,'out1out1out1out1')
+
+      // Earning points section for post create
 
       if (tags && tags.length) out.hashtags = tags;
 

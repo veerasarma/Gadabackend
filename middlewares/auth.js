@@ -40,14 +40,45 @@ function ensureAuth(req, res, next) {
   }
 }
 
-function requireRole(...allowed) {
+function normalizeToArray(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    // If roles stored as JSON array string: '["admin","moderator"]'
+    if (trimmed.startsWith('[')) {
+      try {
+        const arr = JSON.parse(trimmed);
+        if (Array.isArray(arr)) return arr;
+      } catch (_) {}
+    }
+    // Fallback: 'admin' or 'admin,moderator'
+    return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function isAllowedRole(userRolesStr, allowed) {
+  const userRoles = normalizeToArray(userRolesStr).map(r => r.toLowerCase());
+  const allowedArr = normalizeToArray(allowed).map(r => r.toLowerCase());
+
+  if (allowedArr.length === 0) return true; // nothing required -> allow
+  return userRoles.some(r => allowedArr.includes(r));
+}
+
+// Express middleware: ensureAuth should run before this
+function requireRole(allowed) {
   return (req, res, next) => {
-    if (!req.user?.roles?.some(r => allowed.includes(r))) {
+    if (!req.user) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    next();
+    const rolesStr = req.user.roles || req.user.role || ''; // support either field
+    if (isAllowedRole(rolesStr, allowed)) return next();
+    return res.status(403).json({ error: 'Forbidden' });
   };
 }
+
 
 module.exports = { ensureAuth, requireRole };
 

@@ -50,19 +50,17 @@ router.get('/',
         const [rows] = await pool.query(
           `
           SELECT
-            p.id,
+            p.post_id AS id,
             p.user_id AS authorId,
             u.user_name AS authorUsername,
-            p.content,
-            p.created_at AS createdAt,
-            p.is_deleted AS isDeleted,
-            p.is_shadow_hidden AS isShadowHidden,
-            (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) AS likeCount,
-            (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id=p.id AND pc.is_deleted=0) AS commentCount
+            p.text AS content,
+            p.time AS createdAt,
+            (SELECT COUNT(*) FROM posts_reactions pl WHERE pl.post_id=p.post_id) AS likeCount,
+            (SELECT COUNT(*) FROM posts_comments pc WHERE pc.node_id=p.post_id ) AS commentCount
           FROM posts p
           JOIN users u ON u.user_id = p.user_id
           ${whereSql}
-          ORDER BY p.created_at DESC
+          ORDER BY p.time DESC
           LIMIT ? OFFSET ?
           `,
           [...args, Number(limit), Number(offset)]

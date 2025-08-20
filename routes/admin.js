@@ -49,7 +49,7 @@ router.get(
 
       // Sort map
       const sortMap = {
-        createdAt: 'u.createdAt',
+        createdAt: 'u.user_registered',
         username: 'u.user_name',
         email: 'u.user_email',
       };
@@ -61,9 +61,9 @@ router.get(
           u.user_id            AS id,
           u.user_name          AS username,
           u.user_email              AS email,
-          u.createdAt         AS createdAt,
-          u.role               AS role,
-          u.is_suspended       AS isSuspended
+          u.user_registered         AS createdAt,
+          u.user_group               AS role,
+          u.user_banned       AS isSuspended
         FROM users u
         ${whereSql}
         ORDER BY ${sortMap[sort]} ${dir}

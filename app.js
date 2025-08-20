@@ -66,7 +66,7 @@ const uploadsDir = path.join(__dirname, 'uploads'); // adjust if your folder is 
 app.use(
   '/uploads',
   (req, _res, next) => {
-    console.log('[UPLOAD HIT]', req.method, req.url); // e.g. /profile/avatar.png
+    // console.log('[UPLOAD HIT]', req.method, req.url); // e.g. /profile/avatar.png
     next();
   },
   express.static(uploadsDir, {
@@ -132,7 +132,7 @@ app.use((err, _req, res, _next) => {
   console.error(err);
   res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Something went wrong' });
 });
-console.log(process.env.CLIENT_ORIGIN,'process.env.CLIENT_ORIGINprocess.env.CLIENT_ORIGINprocess.env.CLIENT_ORIGIN')
+// console.log(process.env.CLIENT_ORIGIN,'process.env.CLIENT_ORIGINprocess.env.CLIENT_ORIGINprocess.env.CLIENT_ORIGIN')
 // Socket
 const server = http.createServer(app);
 initSocket(server);

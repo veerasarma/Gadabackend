@@ -733,52 +733,16 @@ exports.signIn = async (req, res, next) => {
       field = "username";
     }
 
-    // Brute-force detection
-    //   if (process.env.BRUTE_FORCE_ENABLED === 'true') {
-    //     const lockoutTime = parseInt(process.env.BRUTE_FORCE_LOCK_MIN) * 60;
-    //     const now = Date.now();
-    //     const failedCount = user.failed_login_count;
-    //     const firstAttempt = new Date(user.first_failed_login).getTime();
-
-    //     if (user.failed_login_ip === getClientIP(req) && failedCount >= process.env.BRUTE_FORCE_LIMIT && (now - firstAttempt) < lockoutTime * 1000) {
-    //       throw new ValidationException('Your account is currently locked out. Please try again later!');
-    //     }
-    //   }
       const validPassword = await bcrypt.compare(password, user.user_password);
       if (!validPassword) {
         // Update brute-force counters
         const now = getDateTime();
         const userId = user.id;
   
-        // if (process.env.BRUTE_FORCE_ENABLED === 'true') {
-        //   const resetLock = user.first_failed_login && (Date.now() - new Date(user.first_failed_login).getTime()) > parseInt(process.env.BRUTE_FORCE_LOCK_MIN) * 60 * 1000;
-        //   if (resetLock) {
-        //     await db.query('UPDATE users SET first_failed_login = ?, failed_login_ip = ?, failed_login_count = 1 WHERE id = ?', [now, getClientIP(req), userId]);
-        //   } else {
-        //     await db.query('UPDATE users SET failed_login_count = failed_login_count + 1 WHERE id = ?', [userId]);
-        //     if (!user.first_failed_login) {
-        //       await db.query('UPDATE users SET first_failed_login = ?, failed_login_ip = ? WHERE id = ?', [now, getClientIP(req), userId]);
-        //     }
-        //   }
-        // }
         throw new ValidationException('Please re-enter your password. The password you entered is incorrect');
       }
   
-      // 2FA Handling
-      // if (user.two_factor_enabled && process.env.TWO_FACTOR_ENABLED === 'true') {
-      //   const method = process.env.TWO_FACTOR_TYPE;
-      //   const code = getHashKey(6);
-  
-      //   await db.query('UPDATE users SET two_factor_key = ? WHERE id = ?', [code, user.id]);
-  
-      //   if (method === 'email' && user.email_verified) {
-      //     await sendEmail(user.email, 'Your 2FA Code', `Your code is: ${code}`);
-      //   } else if (method === 'sms' && user.phone_verified) {
-      //     await sendSMS(user.phone, `Your 2FA code is: ${code}`);
-      //   } else {
-      //     return res.json({ twoFactorRequired: true, userId: user.id, method });
-      //   }
-      // }
+     
       if(user.user_approved != '1')
       {
         throw new ValidationException('Your account still not activated');
@@ -786,9 +750,10 @@ exports.signIn = async (req, res, next) => {
   
       // JWT generation
       
-      const roles = user.get_user==1?'admin':(user.get_user==3?'user':'moderator'); // returns ['admin'] | ['user']...
+      const roles = user.user_group==1?'admin':(user.user_group==3?'user':'moderator'); // returns ['admin'] | ['user']...
       console.log(roles,'rolesrolesroles')
       const payload = { userId: user.user_id,email: user.email, roles };
+      user.role = roles;
 
     const token = jwt.sign(payload, process.env.JWT_SECRET, {
       expiresIn: remember ? "30d" : "1d",
