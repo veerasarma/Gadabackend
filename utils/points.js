@@ -22,15 +22,15 @@ async function creditPoints({
     const norm = String(type).toLowerCase();
     const normalizedType =
       norm === 'post' ? 'post_create' :
-      norm === 'like' ? 'post_like' :
+      norm === 'posts_reactions' ? 'posts_reactions' :
       norm;
 
 
     const rulePoints = {
-      post_create: Number(sys.points_per_post ?? 10),
-      post_view: Number(sys.points_per_post_view ?? 1),
-      post_comment: Number(sys.points_per_post_comment ?? 5),
-      post_like: Number(sys.points_per_post_like ?? (sys.points_per_post_comment ?? 1)),
+      post_create: Number(sys.points_per_post ?? 0),
+      post_view: Number(sys.points_per_post_view ?? 0),
+      post_comment: Number(sys.points_per_post_comment ?? 0),
+      posts_reactions: Number(sys.points_per_post_like ?? (sys.points_per_post_reaction ?? 0)),
       follow: Number(sys.points_per_follow ?? 5),
       refer: Number(sys.points_per_referred ?? 5),
     }[normalizedType];
