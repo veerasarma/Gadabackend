@@ -22,7 +22,6 @@ const savesRoutes = require("./routes/saves");
 const memoriesRouter = require("./routes/memories");
 const payments = require("./routes/payments");
 const packagesRoutes = require("./routes/packages");
-<<<<<<< HEAD
 const notificationRoutes = require('./routes/notifications');
 const settingsRoutes = require('./routes/settings');
 const adminRoutes = require('./routes/admin');
@@ -40,26 +39,10 @@ const proRoutes = require('./routes/pro');
 const profileRoutes = require('./routes/profile');
 const searchRoutes = require('./routes/search');
 const hashtagRoutes = require('./routes/hashtag');
-
-
-
-=======
-const notificationRoutes = require("./routes/notifications");
-const settingsRoutes = require("./routes/settings");
-const adminRoutes = require("./routes/admin");
-const adminSettingsRoutes = require("./routes/adminSettings");
-const adminProfileRoutes = require("./routes/adminProfile");
-const adminPostsRoutes = require("./routes/adminPosts");
 const adminRepresentativesRoutes = require("./routes/adminRepresentatives");
-const adminCommentsRoutes = require("./routes/adminComments");
-const { initSystemConfig } = require("./config/systemLoader");
-const initSystem = require("./middlewares/attachSystem");
-const { initSocket } = require("./socket");
-const pointsRoutes = require("./routes/points");
-const representativesRoutes = require("./routes/representatives");
-const proRoutes = require("./routes/pro");
-const postViewsRoutes = require("./routes/postViews");
->>>>>>> 1f96976405c369f2b589baffd74a0ef3bb80710a
+
+
+
 
 const app = express();
 
