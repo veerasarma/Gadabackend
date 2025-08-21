@@ -34,8 +34,12 @@ const initSystem = require('./middlewares/attachSystem');
 const { initSocket } = require('./socket');
 const pointsRoutes =  require('./routes/points');
 const representativesRoutes = require('./routes/representatives');
-const proRoutes = require('./routes/pro');
 const postViewsRoutes = require('./routes/postViews');
+const proRoutes = require('./routes/pro');
+const profileRoutes = require('./routes/profile');
+const searchRoutes = require('./routes/search');
+const hashtagRoutes = require('./routes/hashtag');
+
 
 
 
@@ -123,7 +127,10 @@ app.use('/api/admin/posts', adminPostsRoutes);
 app.use('/api/admin/comments', adminCommentsRoutes);
 app.use('/api/representatives', representativesRoutes);
 app.use('/api/postsviews', postViewsRoutes);
+app.use('/api/search', searchRoutes);
 app.use('/api/pro', proRoutes);
+app.use('/api/profile', profileRoutes);
+app.use('/api/hashtag', hashtagRoutes);
 app.use('/api', initRoute);
 app.use('/api', authRoutes);
 

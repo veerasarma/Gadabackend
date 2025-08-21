@@ -6,6 +6,61 @@ const { PAYSTACK_SECRET_KEY, PAYSTACK_BASE_URL } = process.env;
 const { pool } = require('../config/db');
 const crypto = require('crypto');
 const { ensureAuth } = require('../middlewares/auth');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+
+
+
+// ---------- helpers ----------
+function ensureDirSync(dir) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+function two(n) {
+  return String(n).padStart(2, '0');
+}
+
+// Accept images & PDF only
+const ALLOWED = new Set([
+  'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'
+]);
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    try {
+      const now = new Date();
+      const year = String(now.getFullYear());
+      const month = two(now.getMonth() + 1);
+
+      // absolute path where file is stored
+      const abs = path.join(process.cwd(), 'uploads', 'photos', year, month);
+      ensureDirSync(abs);
+      cb(null, abs);
+    } catch (e) {
+      cb(e);
+    }
+  },
+  filename: (req, file, cb) => {
+    const ext = (path.extname(file.originalname) || '').toLowerCase() || '.jpg';
+    const name = 'GADA_' + crypto.randomBytes(16).toString('hex') + ext;
+    cb(null, name);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+  fileFilter: (req, file, cb) => {
+    if (!ALLOWED.has(file.mimetype)) {
+      return cb(new Error('Unsupported file type'));
+    }
+    cb(null, true);
+  }
+});
+
+
 // POST /api/payments/initialize
 // body: { email, amount, metadata?: { userId, orderId, ... } }
 router.post("/initialize", async (req, res, next) => {
@@ -126,6 +181,16 @@ catch(e)
 });
 
 router.get(
+  '/getsystemdetails',
+  ensureAuth,
+  async (req, res, next) => {
+    try {
+      res.json(req.system);
+    } catch (err) {
+      next(err);
+    }
+  });
+router.get(
   '/transactions',
   ensureAuth,
   async (req, res, next) => {
@@ -161,6 +226,65 @@ router.get(
       res.json(rows);
     } catch (err) {
       next(err);
+    }
+  }
+);
+
+router.post(
+  '/bank-transfer/receipt',
+  ensureAuth,
+  upload.single('receipt'),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'Receipt file is required' });
+      }
+
+      const userId = Number(req.user && req.user.userId);
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+
+      const amount = Number(req.body.baseAmount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ error: 'Invalid amount' });
+      }
+
+      // Build the relative path to store in DB (without the leading "uploads/")
+      // e.g. "photos/2025/08/GADA_abc123.jpg"
+      const uploadRoot = path.join(process.cwd(), 'uploads');
+      const relFromUploads = path
+        .relative(uploadRoot, req.file.path)
+        .replace(/\\/g, '/'); // windows-safe slashes
+
+      // Insert into bank_transfers
+      // status: 0 (pending). handle: 'wallet' to match your "wallet top-up" use-case
+      const sql = `
+        INSERT INTO bank_transfers
+          (user_id, handle, price, bank_receipt, time, status)
+        VALUES (?, 'wallet', ?, ?, NOW(), 0)
+      `;
+
+      const [result] = await pool.promise().query(sql, [
+        userId,
+        amount,
+        relFromUploads, // store "photos/YYYY/MM/..."
+      ]);
+
+      const transferId = result.insertId;
+
+      // Optional: include back useful data for UI
+      return res.status(201).json({
+        ok: true,
+        transferId,
+        userId,
+        price: amount,
+        bank_receipt: relFromUploads,
+        fileUrl: `/uploads/${relFromUploads}` // if you serve /uploads statically (see below)
+      });
+    } catch (err) {
+      console.error('[POST /bank-transfer/receipt] ', err);
+      return res.status(500).json({ error: 'Failed to submit bank transfer receipt' });
     }
   }
 );
