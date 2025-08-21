@@ -41,14 +41,6 @@ const searchRoutes = require("./routes/search");
 const hashtagRoutes = require("./routes/hashtag");
 const adminRepresentativesRoutes = require("./routes/adminRepresentatives");
 const adminBankTransfersRoutes = require("./routes/adminBankTransfers");
-const adminCommentsRoutes = require("./routes/adminComments");
-const { initSystemConfig } = require("./config/systemLoader");
-const initSystem = require("./middlewares/attachSystem");
-const { initSocket } = require("./socket");
-const pointsRoutes = require("./routes/points");
-const representativesRoutes = require("./routes/representatives");
-const proRoutes = require("./routes/pro");
-const postViewsRoutes = require("./routes/postViews");
 
 const app = express();
 
