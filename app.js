@@ -39,6 +39,7 @@ const proRoutes = require('./routes/pro');
 const profileRoutes = require('./routes/profile');
 const searchRoutes = require('./routes/search');
 const hashtagRoutes = require('./routes/hashtag');
+const messengerRoutes = require('./routes/messenger');
 const adminRepresentativesRoutes = require("./routes/adminRepresentatives");
 
 
@@ -134,6 +135,7 @@ app.use('/api/search', searchRoutes);
 app.use('/api/pro', proRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/hashtag', hashtagRoutes);
+app.use('/api/messenger', messengerRoutes);
 app.use('/api', initRoute);
 app.use('/api', authRoutes);
 
