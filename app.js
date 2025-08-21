@@ -41,9 +41,7 @@ const searchRoutes = require('./routes/search');
 const hashtagRoutes = require('./routes/hashtag');
 const messengerRoutes = require('./routes/messenger');
 const adminRepresentativesRoutes = require("./routes/adminRepresentatives");
-
-
-
+const adminBankTransfersRoutes = require("./routes/adminBankTransfers");
 
 const app = express();
 
@@ -119,15 +117,15 @@ app.use("/api/saves", savesRoutes);
 app.use("/api/memories", memoriesRouter);
 app.use("/api/payments", payments);
 app.use("/api/packages", packagesRoutes);
-app.use('/api/reels', require('./routes/reels'));
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/settings', settingsRoutes);
-app.use('/api/points', pointsRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/admin/settings', adminSettingsRoutes);
-app.use('/api/admin/profile', adminProfileRoutes);
-app.use('/api/admin/posts', adminPostsRoutes);
-app.use('/api/admin/comments', adminCommentsRoutes);
+app.use("/api/reels", require("./routes/reels"));
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/settings", settingsRoutes);
+app.use("/api/points", pointsRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/admin/settings", adminSettingsRoutes);
+app.use("/api/admin/profile", adminProfileRoutes);
+app.use("/api/admin/posts", adminPostsRoutes);
+app.use("/api/admin/comments", adminCommentsRoutes);
 app.use("/api/admin/representatives", adminRepresentativesRoutes);
 app.use('/api/representatives', representativesRoutes);
 app.use('/api/postsviews', postViewsRoutes);
@@ -138,6 +136,7 @@ app.use('/api/hashtag', hashtagRoutes);
 app.use('/api/messenger', messengerRoutes);
 app.use('/api', initRoute);
 app.use('/api', authRoutes);
+app.use("/api/admin/bank-transfers", adminBankTransfersRoutes);
 
 
 app.get("/", (_req, res) => res.send("API is running"));
