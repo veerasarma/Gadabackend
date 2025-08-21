@@ -32,17 +32,6 @@ function mapPostRow(p) {
 // GET /api/posts  (feed)
 router.get('/', ensureAuth, async (req, res) => {
   try {
-    // 1) fetch recent posts with author
-    // const [posts] = await pool.promise().query(`
-    //   SELECT p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
-    //          u.user_name   AS authorUsername,
-    //          u.user_picture AS authorProfileImage
-    //     FROM posts p
-    //     JOIN users u ON u.user_id = p.user_id
-    //    WHERE p.is_hidden = '0'
-    //    ORDER BY p.time DESC
-    //    LIMIT 100
-    // `);
    
     const [posts] = await pool.promise().query(`
         SELECT
