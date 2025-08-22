@@ -6,9 +6,51 @@ const authMiddleware = require("../");
 // const auth = require("../middlewares/authMiddleware");
 const { ensureAuth } = require("../middlewares/auth");
 
-router.get("/", async (req, res, next) => {
+// router.get("/", async (req, res, next) => {
+//   try {
+//     const [rows] = await db.query(`
+//       SELECT
+//         package_id,
+//         name,
+//         price,
+//         period_num,
+//         period,
+//         color,
+//         icon,
+//         boost_posts,
+//         boost_pages,
+//         verification_badge_enabled,
+//         custom_description
+//       FROM packages
+//       ORDER BY package_order ASC
+//     `);
+
+//     if (!rows.length) {
+//       return res.status(404).json({
+//         status: false,
+//         message: "No packages found",
+//       });
+//     }
+
+//     res.json({
+//       status: true,
+//       data: rows,
+//     });
+//   } catch (err) {
+//     console.error("Error fetching packages:", err);
+//     res.status(500).json({
+//       status: false,
+//       message: "Database query failed",
+//     });
+//     // next(err);
+//   }
+// });
+
+router.get("/", ensureAuth, async (req, res, next) => {
   try {
-    const [rows] = await db.query(`
+    const user_id = req.user.userId;
+
+    const [packages] = await db.query(`
       SELECT 
         package_id,
         name,
@@ -25,16 +67,53 @@ router.get("/", async (req, res, next) => {
       ORDER BY package_order ASC
     `);
 
-    if (!rows.length) {
+    if (!packages.length) {
       return res.status(404).json({
         status: false,
         message: "No packages found",
       });
     }
 
+    // 2. Fetch user wallet balance
+    const [[wallet]] = await db.query(
+      `SELECT user_wallet_balance FROM users WHERE user_id = ?`,
+      [user_id]
+    );
+
+    // 3. Check if user already purchased a plan (current active one)
+    // const [[activePlan]] = await db.query(
+    //   `
+    //   SELECT p.package_id, p.name, p.price, p.period, p.period_num
+    //   FROM packages_payments pp
+    //   JOIN packages p ON pp.package_id = p.package_id
+    //   WHERE pp.user_id = ?
+    //     AND pp.status = 'active'
+    //   ORDER BY pp.created_at DESC
+    //   LIMIT 1
+    //   `,
+    //   [user_id]
+    // );
+
+    const [[activePlan]] = await db.query(
+      `
+  SELECT 
+    payment_id,
+    package_name,
+    package_price,
+    payment_date
+  FROM packages_payments
+  WHERE user_id = ?
+  ORDER BY payment_date DESC
+  LIMIT 1
+  `,
+      [user_id]
+    );
+
     res.json({
       status: true,
-      data: rows,
+      data: packages, // all packages
+      walletBalance: wallet?.user_wallet_balance || 0,
+      activePlan: activePlan || null, // null if no current plan
     });
   } catch (err) {
     console.error("Error fetching packages:", err);
