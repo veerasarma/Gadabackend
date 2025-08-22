@@ -27,6 +27,10 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }  // 5MB
 });
 
+function sanitizeQ(q='') {
+  return q.trim().replace(/\s+/g, ' ');
+}
+
 // 2) PUT /api/users/:hash/avatar
 router.put(
   '/:hash/avatar',
@@ -192,6 +196,45 @@ router.get(
     }
   }
 );
+
+router.get('/suggest', async (req, res) => {
+  try {
+    console.log('dfsdfsdf')
+    const raw = String(req.query.q || '');
+    const q = sanitizeQ(raw);
+    if (q.length < 2) return res.json([]);
+
+    // Heuristics
+    
+    const plain =  q;
+    // const like = makeLike(plain.toLowerCase());
+
+    const qLower = plain.toLowerCase();
+
+    // We attempt FULLTEXT where possible; otherwise LIKE
+    // USERS
+   // USERS (prefix match on each field)
+const [userRows] = await pool.query(
+    `
+    SELECT u.user_id   AS id,
+           u.user_name AS username,
+           CONCAT_WS(' ', u.user_firstname, u.user_lastname) AS fullName,
+           u.user_picture AS avatar
+      FROM users u
+     WHERE (LOWER(u.user_name)      LIKE CONCAT(?, '%')
+         OR  LOWER(u.user_firstname) LIKE CONCAT(?, '%')
+         OR  LOWER(u.user_lastname)  LIKE CONCAT(?, '%'))
+     ORDER BY u.user_id DESC
+     LIMIT 5
+    `,
+    [qLower, qLower, qLower]
+  );
+  res.json(userRows);
+}
+catch(e){
+
+}
+});
 
 // GET /api/users/:id
 router.get(
