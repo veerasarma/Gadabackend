@@ -56,28 +56,82 @@ router.use(ensureAuth, requireRole("admin"));
 //   }
 // });
 
+// router.get("/", async (req, res) => {
+//   try {
+//     const { status = "all", search = "", page = 1, limit = 10 } = req.query;
+//     const offset = (Number(page) - 1) * Number(limit);
+
+//     let where = "1=1";
+//     const values = [];
+
+//     // Filter by status (success = 1, failed = -1, pending = 0 maybe)
+//     if (status !== "all") {
+//       where += " AND bt.status = ?";
+//       values.push(status);
+//     }
+
+//     // Search by user_id or handle or username
+//     if (search) {
+//       where +=
+//         " AND (bt.user_id LIKE ? OR bt.handle LIKE ? OR u.user_name LIKE ?)";
+//       values.push(`%${search}%`, `%${search}%`, `%${search}%`);
+//     }
+
+//     // Count (join with users for search)
+//     const [[{ count }]] = await pool.query(
+//       `SELECT COUNT(*) as count
+//        FROM bank_transfers bt
+//        LEFT JOIN users u ON bt.user_id = u.user_id
+//        WHERE ${where}`,
+//       values
+//     );
+
+//     // Rows with username included
+//     const [items] = await pool.query(
+//       `SELECT bt.*, u.user_name
+//        FROM bank_transfers bt
+//        LEFT JOIN users u ON bt.user_id = u.user_id
+//        WHERE ${where}
+//        ORDER BY bt.time DESC
+//        LIMIT ? OFFSET ?`,
+//       [...values, Number(limit), offset]
+//     );
+
+//     const totalPages = Math.ceil(count / Number(limit));
+
+//     res.json({
+//       items,
+//       total: count,
+//       totalPages,
+//       hasPrev: Number(page) > 1,
+//       hasNext: Number(page) < totalPages,
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ message: "Failed to load bank transfers" });
+//   }
+// });
+
 router.get("/", async (req, res) => {
   try {
-    const { status = "all", search = "", page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 10 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
-    let where = "1=1";
+    let where = "bt.status = 0"; // ✅ always pending
     const values = [];
 
-    // Filter by status (success = 1, failed = -1, pending = 0 maybe)
-    if (status !== "all") {
-      where += " AND bt.status = ?";
-      values.push(status);
-    }
-
-    // Search by user_id or handle or username
-    if (search) {
+    // Search by user_id, handle, username (optional)
+    if (req.query.search) {
       where +=
         " AND (bt.user_id LIKE ? OR bt.handle LIKE ? OR u.user_name LIKE ?)";
-      values.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      values.push(
+        `%${req.query.search}%`,
+        `%${req.query.search}%`,
+        `%${req.query.search}%`
+      );
     }
 
-    // Count (join with users for search)
+    // Count
     const [[{ count }]] = await pool.query(
       `SELECT COUNT(*) as count
        FROM bank_transfers bt
@@ -86,7 +140,7 @@ router.get("/", async (req, res) => {
       values
     );
 
-    // Rows with username included
+    // Rows
     const [items] = await pool.query(
       `SELECT bt.*, u.user_name
        FROM bank_transfers bt
@@ -113,6 +167,7 @@ router.get("/", async (req, res) => {
 });
 
 router.put("/:id/status", async (req, res) => {
+  const conn = await pool.getConnection();
   try {
     const { id } = req.params;
     const { action } = req.body; // "accept" | "decline" | "pending"
@@ -123,20 +178,109 @@ router.put("/:id/status", async (req, res) => {
     else if (action === "pending") newStatus = 0; // pending
     else return res.status(400).json({ message: "Invalid action" });
 
-    const [result] = await pool.query(
+    // Start transaction
+    await conn.beginTransaction();
+
+    // 1. Update bank transfer status
+    const [transferRows] = await conn.query(
+      `SELECT * FROM bank_transfers WHERE transfer_id=?`,
+      [id]
+    );
+
+    if (transferRows.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ message: "Transfer not found" });
+    }
+
+    const transfer = transferRows[0];
+    const { user_id, price, handle } = transfer;
+
+    // Update status
+    const [result] = await conn.query(
       `UPDATE bank_transfers SET status=? WHERE transfer_id=?`,
       [newStatus, id]
     );
 
     if (result.affectedRows === 0) {
-      return res.status(404).json({ message: "Transfer not found" });
+      await conn.rollback();
+      return res.status(404).json({ message: "Failed to update transfer" });
     }
 
-    res.json({ success: true, message: "Status updated", status: newStatus });
+    // ✅ If action = accept, update wallet + logs
+    if (action === "accept") {
+      // 2. Update user balance
+      await conn.query(
+        `UPDATE users SET user_wallet_balance = user_wallet_balance + ? WHERE user_id=?`,
+        [price, user_id]
+      );
+
+      // 3. Insert into wallet_transactions (avoid duplicate)
+      const reference = `banktransfer_${id}`;
+      const [exists] = await conn.query(
+        `SELECT transaction_id FROM wallet_transactions WHERE reference=?`,
+        [reference]
+      );
+
+      if (exists.length === 0) {
+        await conn.query(
+          `INSERT INTO wallet_transactions
+            (user_id, node_type, node_id, amount, reference, type, date)
+           VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+          [user_id, "recharge", id, price, reference, "in"]
+        );
+
+        // 4. Insert into log_payments
+        await conn.query(
+          `INSERT INTO log_payments
+            (user_id, method, handle, amount, time)
+           VALUES (?, ?, ?, ?, NOW())`,
+          [user_id, "bank_transfer", handle || "wallet", price]
+        );
+      }
+    }
+
+    // Commit transaction
+    await conn.commit();
+
+    res.json({
+      success: true,
+      message: "Status updated",
+      status: newStatus,
+    });
   } catch (err) {
+    await conn.rollback();
     console.error(err);
     res.status(500).json({ message: "Failed to update transfer status" });
+  } finally {
+    conn.release();
   }
 });
+
+// router.put("/:id/status", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { action } = req.body; // "accept" | "decline" | "pending"
+
+//     let newStatus;
+//     if (action === "accept") newStatus = 1; // success
+//     else if (action === "decline") newStatus = -1; // failed
+//     else if (action === "pending") newStatus = 0; // pending
+//     else return res.status(400).json({ message: "Invalid action" });
+
+//     const [result] = await pool.query(
+//       `UPDATE bank_transfers SET status=? WHERE transfer_id=?`,
+//       [newStatus, id]
+//     );
+
+//     if (result.affectedRows === 0) {
+//       return res.status(404).json({ message: "Transfer not found" });
+//     }
+
+//     res.json({ success: true, message: "Status updated", status: newStatus });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ message: "Failed to update transfer status" });
+//   }
+// });
 
 module.exports = router;
