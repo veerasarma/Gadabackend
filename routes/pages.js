@@ -1,4 +1,4 @@
-// routes/groups.js
+// routes/pages.js
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -30,28 +30,21 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 /* ------------------------------ helpers ------------------------------ */
-async function getGroupByIdOrName(idOrName, conn) {
+async function getPageByIdOrName(idOrName, conn) {
   if (/^\d+$/.test(String(idOrName))) {
-    const [[row]] = await conn.query(`SELECT * FROM groups WHERE group_id=? LIMIT 1`, [Number(idOrName)]);
+    const [[row]] = await conn.query(`SELECT * FROM pages WHERE page_id=? LIMIT 1`, [Number(idOrName)]);
     return row || null;
   }
-  const [[row]] = await conn.query(`SELECT * FROM groups WHERE group_name=? LIMIT 1`, [idOrName]);
+  const [[row]] = await conn.query(`SELECT * FROM pages WHERE page_name=? LIMIT 1`, [idOrName]);
   return row || null;
 }
-async function isGroupAdmin(userId, groupId, conn) {
-  if (!userId || !groupId) return false;
+async function isPageAdmin(userId, pageId, conn) {
+  if (!userId || !pageId) return false;
   const [[row]] = await conn.query(
-    `SELECT 1 FROM groups_admins WHERE group_id=? AND user_id=? LIMIT 1`,
-    [groupId, userId]
+    `SELECT 1 FROM pages_admins WHERE page_id=? AND user_id=? LIMIT 1`,
+    [pageId, userId]
   );
   return !!row;
-}
-async function isGroupMember(userId, groupId, conn) {
-  const [[row]] = await conn.query(
-    `SELECT approved FROM groups_members WHERE group_id=? AND user_id=? LIMIT 1`,
-    [groupId, userId]
-  );
-  return row ? { approved: row.approved === '1' } : null;
 }
 
 /* ============================== CATEGORIES ============================== */
@@ -59,12 +52,12 @@ router.get('/categories', ensureAuth, async (_req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT category_id, category_parent_id, category_name, category_order
-         FROM groups_categories
+         FROM pages_categories
         ORDER BY category_parent_id ASC, category_order ASC, category_name ASC`
     );
     res.json(rows);
   } catch (e) {
-    console.error('[GET /groups/categories]', e);
+    console.error('[GET /pages/categories]', e);
     res.status(500).json({ error: 'Failed to load categories' });
   }
 });
@@ -73,10 +66,9 @@ router.get('/categories', ensureAuth, async (_req, res) => {
 router.post('/', ensureAuth, async (req, res) => {
   const userId = Number(req.user.userId);
   const {
-    group_name, group_title, group_privacy = 'public',
-    group_category, group_country, group_description
+    page_name, page_title, page_category, page_country, page_description
   } = req.body || {};
-  if (!group_name || !group_title || !group_category || !group_country) {
+  if (!page_name || !page_title || !page_category || !page_country) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
@@ -85,31 +77,35 @@ router.post('/', ensureAuth, async (req, res) => {
     await conn.beginTransaction();
 
     const [ok] = await conn.query(
-      `INSERT INTO groups
-         (group_privacy, group_admin, group_category, group_name, group_title, group_country, group_description, group_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [group_privacy, userId, group_category, group_name, group_title, group_country, group_description || '']
+      `INSERT INTO pages
+         (page_admin, page_category, page_name, page_title, page_country, page_description, page_date)
+       VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+      [userId, page_category, page_name, page_title, page_country, page_description || '']
     );
-    const groupId = ok.insertId;
+    const pageId = ok.insertId;
 
-    await conn.query(`INSERT IGNORE INTO groups_admins (group_id, user_id) VALUES (?, ?)`, [groupId, userId]);
-    await conn.query(`INSERT IGNORE INTO groups_members (group_id, user_id, approved) VALUES (?, ?, '1')`, [groupId, userId]);
+    await conn.query(
+      `INSERT IGNORE INTO pages_admins (page_id, user_id) VALUES (?, ?)`,
+      [pageId, userId]
+    );
 
     await conn.commit();
-    res.status(201).json({ groupId, group_name, group_title });
+    res.status(201).json({ pageId, page_name, page_title });
   } catch (e) {
     await conn.rollback();
-    console.error('[POST /groups]', e);
-    res.status(500).json({ error: 'Failed to create group' });
-  } finally { conn.release(); }
+    console.error('[POST /pages]', e);
+    res.status(500).json({ error: 'Failed to create page' });
+  } finally {
+    conn.release();
+  }
 });
 
 /* ============================== LIST (sidebar filters) ============================== */
-// GET /api/groups?q=&categoryId=&sort=popular|recent&cursor=&limit=&my=1
+// GET /api/pages?q=&categoryId=&sort=popular|recent&cursor=&limit=&my=1
 router.get('/', ensureAuth, async (req, res) => {
   const q = (req.query.q || '').toString().trim().toLowerCase();
   const categoryId = req.query.categoryId ? Number(req.query.categoryId) : null;
-  const sort = (req.query.sort || 'popular').toString();
+  const sort = (req.query.sort || 'recent').toString();
   const cursor = req.query.cursor ? Number(req.query.cursor) : null;
   const limit = Math.min(24, Math.max(6, Number(req.query.limit) || 12));
   const my = String(req.query.my || '') === '1';
@@ -118,36 +114,33 @@ router.get('/', ensureAuth, async (req, res) => {
   try {
     const params = [];
     const where = [];
-    let fromSql = `FROM groups g`;
-
+    let fromSql = `FROM pages p`;
     if (my) {
-      fromSql += ` LEFT JOIN groups_members m ON m.group_id = g.group_id AND m.approved='1'`;
-      where.push(`(g.group_admin = ? OR m.user_id = ?)`);
+      fromSql += ` LEFT JOIN pages_admins a ON a.page_id = p.page_id`;
+      where.push(`(p.page_admin = ? OR a.user_id = ?)`);
       params.push(Number(req.user.userId), Number(req.user.userId));
     }
-
     if (q) {
-      where.push(`(LOWER(g.group_name) LIKE CONCAT(?, '%') OR LOWER(g.group_title) LIKE CONCAT(?, '%'))`);
+      where.push(`(LOWER(p.page_name) LIKE CONCAT(?, '%') OR LOWER(p.page_title) LIKE CONCAT(?, '%'))`);
       params.push(q, q);
     }
     if (categoryId) {
-      where.push(`g.group_category = ?`);
+      where.push(`p.page_category = ?`);
       params.push(categoryId);
     }
     if (cursor) {
-      where.push(`g.group_id < ?`);
+      where.push(`p.page_id < ?`);
       params.push(cursor);
     }
-
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const orderSql = sort === 'recent'
-      ? `ORDER BY g.group_id DESC`
-      : `ORDER BY g.group_members DESC, g.group_id DESC`;
+    const orderSql = sort === 'popular'
+      ? `ORDER BY p.page_likes DESC, p.page_id DESC`
+      : `ORDER BY p.page_id DESC`;
 
     const [rows] = await conn.query(
       `
-      SELECT g.group_id, g.group_name, g.group_title, g.group_picture, g.group_cover,
-             g.group_category, g.group_country, g.group_members, g.group_privacy, g.group_date
+      SELECT p.page_id, p.page_name, p.page_title, p.page_picture, p.page_cover,
+             p.page_category, p.page_country, p.page_likes, p.page_date
         ${fromSql}
         ${whereSql}
         ${orderSql}
@@ -156,70 +149,73 @@ router.get('/', ensureAuth, async (req, res) => {
       params
     );
 
-    const nextCursor = rows.length === limit ? rows[rows.length - 1].group_id : null;
+    const nextCursor = rows.length === limit ? rows[rows.length - 1].page_id : null;
     res.json({ items: rows, nextCursor });
   } catch (e) {
-    console.error('[GET /groups]', e);
-    res.status(500).json({ error: 'Failed to load groups' });
-  } finally { conn.release(); }
-});
-
-// my incoming invites
-router.get('/invites', ensureAuth, async (req, res) => {
-  const me = Number(req.user.userId);
-  try {
-    const [rows] = await pool.query(
-      `SELECT i.id AS inviteId, g.group_id, g.group_name, g.group_title, g.group_picture,
-              u.user_id AS fromId, u.user_name AS fromUsername, u.user_picture AS fromAvatar
-         FROM groups_invites i
-         JOIN groups g ON g.group_id = i.group_id
-         JOIN users u ON u.user_id = i.from_user_id
-        WHERE i.user_id = ?
-        ORDER BY i.id DESC
-        LIMIT 100`,
-      [me]
-    );
-    res.json(rows);
-  } catch (e) {
-    console.error('[GET /groups/invites]', e);
-    res.status(500).json({ error: 'Failed to load invites' });
+    console.error('[GET /pages]', e);
+    res.status(500).json({ error: 'Failed to load pages' });
+  } finally {
+    conn.release();
   }
 });
 
+// list my incoming invites
+router.get('/invites', ensureAuth, async (req, res) => {
+    const me = Number(req.user.userId);
+    try {
+      const [rows] = await pool.query(
+        `SELECT i.id AS inviteId, p.page_id, p.page_name, p.page_title, p.page_picture,
+                u.user_id AS fromId, u.user_name AS fromUsername, u.user_picture AS fromAvatar
+           FROM pages_invites i
+           JOIN pages p ON p.page_id = i.page_id
+           JOIN users u ON u.user_id = i.from_user_id
+          WHERE i.user_id = ?
+          ORDER BY i.id DESC
+          LIMIT 100`,
+        [me]
+      );
+      res.json(rows);
+    } catch (e) {
+      console.error('[GET /pages/invites]', e);
+      res.status(500).json({ error: 'Failed to load invites' });
+    }
+  });
 
-/* ============================== GROUP DETAILS ============================== */
+/* ============================== PAGE DETAILS ============================== */
 router.get('/:idOrName', ensureAuth, async (req, res) => {
   const me = Number(req.user.userId);
   const idOrName = req.params.idOrName;
 
   const conn = await pool.getConnection();
   try {
-    const group = await getGroupByIdOrName(idOrName, conn);
-    if (!group) return res.status(404).json({ error: 'Group not found' });
+    const page = await getPageByIdOrName(idOrName, conn);
+    if (!page) return res.status(404).json({ error: 'Page not found' });
 
     const [admins] = await conn.query(
       `SELECT a.user_id, u.user_name, u.user_firstname, u.user_lastname, u.user_picture
-         FROM groups_admins a
+         FROM pages_admins a
          JOIN users u ON u.user_id = a.user_id
-        WHERE a.group_id = ?`,
-      [group.group_id]
+        WHERE a.page_id = ?`,
+      [page.page_id]
     );
 
-    const membership = await isGroupMember(me, group.group_id, conn);
+    const [[likedRow]] = await conn.query(
+      `SELECT 1 FROM pages_likes WHERE page_id=? AND user_id=? LIMIT 1`,
+      [page.page_id, me]
+    );
 
     res.json({
-      group: {
-        id: group.group_id,
-        name: group.group_name,
-        title: group.group_title,
-        picture: group.group_picture,
-        cover: group.group_cover,
-        categoryId: group.group_category,
-        country: group.group_country,
-        description: group.group_description,
-        privacy: group.group_privacy,
-        members: group.group_members,
-        date: group.group_date
+      page: {
+        id: page.page_id,
+        name: page.page_name,
+        title: page.page_title,
+        picture: page.page_picture,
+        cover: page.page_cover,
+        categoryId: page.page_category,
+        country: page.page_country,
+        description: page.page_description,
+        likes: page.page_likes,
+        date: page.page_date
       },
       admins: admins.map(a => ({
         id: a.user_id,
@@ -227,13 +223,14 @@ router.get('/:idOrName', ensureAuth, async (req, res) => {
         username: a.user_name,
         avatar: a.user_picture || null
       })),
-      isMember: !!membership?.approved,
-      isPending: !!membership && !membership.approved
+      hasLiked: !!likedRow
     });
   } catch (e) {
-    console.error('[GET /groups/:id]', e);
-    res.status(500).json({ error: 'Failed to load group' });
-  } finally { conn.release(); }
+    console.error('[GET /pages/:id]', e);
+    res.status(500).json({ error: 'Failed to load page' });
+  } finally {
+    conn.release();
+  }
 });
 
 /* ============================== MEDIA (admins) ============================== */
@@ -242,16 +239,16 @@ router.post('/:idOrName/picture', ensureAuth, upload.single('picture'), async (r
   const idOrName = req.params.idOrName;
   const conn = await pool.getConnection();
   try {
-    const group = await getGroupByIdOrName(idOrName, conn);
-    if (!group) return res.status(404).json({ error: 'Group not found' });
-    const admin = (group.group_admin === me) || (await isGroupAdmin(me, group.group_id, conn));
+    const page = await getPageByIdOrName(idOrName, conn);
+    if (!page) return res.status(404).json({ error: 'Page not found' });
+    const admin = (page.page_admin === me) || (await isPageAdmin(me, page.page_id, conn));
     if (!admin) return res.status(403).json({ error: 'Forbidden' });
 
     const rel = path.relative(path.join(process.cwd(), 'uploads'), req.file.path).replace(/\\/g, '/');
-    await conn.query(`UPDATE groups SET group_picture=? WHERE group_id=?`, [rel, group.group_id]);
+    await conn.query(`UPDATE pages SET page_picture=? WHERE page_id=?`, [rel, page.page_id]);
     res.json({ picture: rel });
   } catch (e) {
-    console.error('[POST /groups/:id/picture]', e);
+    console.error('[POST /pages/:id/picture]', e);
     res.status(500).json({ error: 'Failed to update picture' });
   } finally { conn.release(); }
 });
@@ -261,79 +258,54 @@ router.post('/:idOrName/cover', ensureAuth, upload.single('cover'), async (req, 
   const idOrName = req.params.idOrName;
   const conn = await pool.getConnection();
   try {
-    const group = await getGroupByIdOrName(idOrName, conn);
-    if (!group) return res.status(404).json({ error: 'Group not found' });
-    const admin = (group.group_admin === me) || (await isGroupAdmin(me, group.group_id, conn));
+    const page = await getPageByIdOrName(idOrName, conn);
+    if (!page) return res.status(404).json({ error: 'Page not found' });
+    const admin = (page.page_admin === me) || (await isPageAdmin(me, page.page_id, conn));
     if (!admin) return res.status(403).json({ error: 'Forbidden' });
 
     const rel = path.relative(path.join(process.cwd(), 'uploads'), req.file.path).replace(/\\/g, '/');
-    await conn.query(`UPDATE groups SET group_cover=? WHERE group_id=?`, [rel, group.group_id]);
+    await conn.query(`UPDATE pages SET page_cover=? WHERE page_id=?`, [rel, page.page_id]);
     res.json({ cover: rel });
   } catch (e) {
-    console.error('[POST /groups/:id/cover]', e);
+    console.error('[POST /pages/:id/cover]', e);
     res.status(500).json({ error: 'Failed to update cover' });
   } finally { conn.release(); }
 });
 
-/* ============================== MEMBERSHIP ============================== */
-router.post('/:idOrName/join', ensureAuth, async (req, res) => {
+/* ============================== LIKE / UNLIKE ============================== */
+router.post('/:idOrName/like', ensureAuth, async (req, res) => {
   const me = Number(req.user.userId);
   const idOrName = req.params.idOrName;
+
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const group = await getGroupByIdOrName(idOrName, conn);
-    if (!group) { await conn.rollback(); return res.status(404).json({ error: 'Group not found' }); }
+    const page = await getPageByIdOrName(idOrName, conn);
+    if (!page) { await conn.rollback(); return res.status(404).json({ error: 'Page not found' }); }
 
-    // secret groups require an invite
-    if (group.group_privacy === 'secret') {
-      await conn.rollback(); return res.status(403).json({ error: 'Invite required' });
-    }
-    const approved = group.group_privacy === 'public' ? '1' : '0';
-    await conn.query(
-      `INSERT INTO groups_members (group_id, user_id, approved)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE approved=VALUES(approved)`,
-      [group.group_id, me, approved]
+    const [[row]] = await conn.query(
+      `SELECT id FROM pages_likes WHERE page_id=? AND user_id=? LIMIT 1`,
+      [page.page_id, me]
     );
-    if (approved === '1') {
-      await conn.query(`UPDATE groups SET group_members = group_members + 1 WHERE group_id=?`, [group.group_id]);
+
+    if (row) {
+      await conn.query(`DELETE FROM pages_likes WHERE id=?`, [row.id]);
+      await conn.query(`UPDATE pages SET page_likes = GREATEST(page_likes - 1, 0) WHERE page_id=?`, [page.page_id]);
+      await conn.commit();
+      return res.json({ hasLiked: false });
+    } else {
+      await conn.query(`INSERT INTO pages_likes (page_id, user_id) VALUES (?, ?)`, [page.page_id, me]);
+      await conn.query(`UPDATE pages SET page_likes = page_likes + 1 WHERE page_id=?`, [page.page_id]);
+      await conn.commit();
+      return res.json({ hasLiked: true });
     }
-    await conn.commit();
-    res.json({ isMember: approved === '1', isPending: approved === '0' });
   } catch (e) {
     await conn.rollback();
-    console.error('[POST /groups/:id/join]', e);
-    res.status(500).json({ error: 'Failed to join' });
-  } finally { conn.release(); }
-});
-
-router.post('/:idOrName/leave', ensureAuth, async (req, res) => {
-  const me = Number(req.user.userId);
-  const idOrName = req.params.idOrName;
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    const group = await getGroupByIdOrName(idOrName, conn);
-    if (!group) { await conn.rollback(); return res.status(404).json({ error: 'Group not found' }); }
-
-    const [[m]] = await conn.query(
-      `SELECT approved FROM groups_members WHERE group_id=? AND user_id=? LIMIT 1`,
-      [group.group_id, me]
-    );
-    if (!m) { await conn.rollback(); return res.json({ ok: true }); }
-
-    await conn.query(`DELETE FROM groups_members WHERE group_id=? AND user_id=?`, [group.group_id, me]);
-    if (m.approved === '1') {
-      await conn.query(`UPDATE groups SET group_members = GREATEST(group_members - 1, 0) WHERE group_id=?`, [group.group_id]);
-    }
-    await conn.commit();
-    res.json({ ok: true });
-  } catch (e) {
-    await conn.rollback();
-    console.error('[POST /groups/:id/leave]', e);
-    res.status(500).json({ error: 'Failed to leave' });
-  } finally { conn.release(); }
+    console.error('[POST /pages/:id/like]', e);
+    res.status(500).json({ error: 'Failed to like/unlike' });
+  } finally {
+    conn.release();
+  }
 });
 
 /* ============================== INVITES ============================== */
@@ -357,39 +329,42 @@ router.get('/users/suggest', ensureAuth, async (req, res) => {
     );
     res.json(rows);
   } catch (e) {
-    console.error('[GET /groups/users/suggest]', e);
+    console.error('[GET /pages/users/suggest]', e);
     res.status(500).json({ error: 'Search failed' });
   }
 });
 
 
-// list pending invites for a group (admins)
+
+// list pending invites for a page (admins only)
 router.get('/:idOrName/invites', ensureAuth, async (req, res) => {
   const me = Number(req.user.userId);
   const idOrName = req.params.idOrName;
   const conn = await pool.getConnection();
   try {
-    const group = await getGroupByIdOrName(idOrName, conn);
-    if (!group) return res.status(404).json({ error: 'Group not found' });
-    const admin = (group.group_admin === me) || (await isGroupAdmin(me, group.group_id, conn));
+    const page = await getPageByIdOrName(idOrName, conn);
+    if (!page) return res.status(404).json({ error: 'Page not found' });
+    const admin = (page.page_admin === me) || (await isPageAdmin(me, page.page_id, conn));
     if (!admin) return res.status(403).json({ error: 'Forbidden' });
 
     const [rows] = await conn.query(
-      `SELECT i.id AS inviteId, i.group_id, i.user_id AS toUserId,
+      `SELECT i.id AS inviteId, i.page_id, i.user_id AS toUserId,
               u.user_name AS toUsername, u.user_picture AS toAvatar,
               i.from_user_id AS fromUserId, uf.user_name AS fromUsername
-         FROM groups_invites i
+         FROM pages_invites i
          JOIN users u  ON u.user_id  = i.user_id
          JOIN users uf ON uf.user_id = i.from_user_id
-        WHERE i.group_id = ?
+        WHERE i.page_id = ?
         ORDER BY i.id DESC`,
-      [group.group_id]
+      [page.page_id]
     );
     res.json(rows);
   } catch (e) {
-    console.error('[GET /groups/:id/invites]', e);
-    res.status(500).json({ error: 'Failed to load group invites' });
-  } finally { conn.release(); }
+    console.error('[GET /pages/:id/invites]', e);
+    res.status(500).json({ error: 'Failed to load page invites' });
+  } finally {
+    conn.release();
+  }
 });
 
 // create invite (admin)
@@ -401,24 +376,26 @@ router.post('/:idOrName/invites', ensureAuth, async (req, res) => {
 
   const conn = await pool.getConnection();
   try {
-    const group = await getGroupByIdOrName(idOrName, conn);
-    if (!group) return res.status(404).json({ error: 'Group not found' });
+    const page = await getPageByIdOrName(idOrName, conn);
+    if (!page) return res.status(404).json({ error: 'Page not found' });
 
-    const admin = (group.group_admin === me) || (await isGroupAdmin(me, group.group_id, conn));
+    const admin = (page.page_admin === me) || (await isPageAdmin(me, page.page_id, conn));
     if (!admin) return res.status(403).json({ error: 'Forbidden' });
 
     await conn.query(
-      `INSERT IGNORE INTO groups_invites (group_id, user_id, from_user_id) VALUES (?, ?, ?)`,
-      [group.group_id, target, me]
+      `INSERT IGNORE INTO pages_invites (page_id, user_id, from_user_id) VALUES (?, ?, ?)`,
+      [page.page_id, target, me]
     );
     res.json({ ok: true });
   } catch (e) {
-    console.error('[POST /groups/:id/invites]', e);
+    console.error('[POST /pages/:id/invites]', e);
     res.status(500).json({ error: 'Failed to create invite' });
-  } finally { conn.release(); }
+  } finally {
+    conn.release();
+  }
 });
 
-// accept invite -> membership approved
+// accept invite
 router.post('/:idOrName/invites/:inviteId/accept', ensureAuth, async (req, res) => {
   const me = Number(req.user.userId);
   const inviteId = Number(req.params.inviteId);
@@ -427,32 +404,23 @@ router.post('/:idOrName/invites/:inviteId/accept', ensureAuth, async (req, res) 
   try {
     await conn.beginTransaction();
 
-    const group = await getGroupByIdOrName(idOrName, conn);
-    if (!group) { await conn.rollback(); return res.status(404).json({ error: 'Group not found' }); }
+    const page = await getPageByIdOrName(idOrName, conn);
+    if (!page) { await conn.rollback(); return res.status(404).json({ error: 'Page not found' }); }
 
     const [[inv]] = await conn.query(
-      `SELECT id FROM groups_invites WHERE id=? AND group_id=? AND user_id=? LIMIT 1`,
-      [inviteId, group.group_id, me]
+      `SELECT id FROM pages_invites WHERE id=? AND page_id=? AND user_id=? LIMIT 1`,
+      [inviteId, page.page_id, me]
     );
     if (!inv) { await conn.rollback(); return res.status(404).json({ error: 'Invite not found' }); }
 
-    await conn.query(`DELETE FROM groups_invites WHERE id=?`, [inviteId]);
-    const [[mem]] = await conn.query(
-      `SELECT approved FROM groups_members WHERE group_id=? AND user_id=? LIMIT 1`,
-      [group.group_id, me]
-    );
-    if (mem) {
-      await conn.query(`UPDATE groups_members SET approved='1' WHERE group_id=? AND user_id=?`, [group.group_id, me]);
-    } else {
-      await conn.query(`INSERT INTO groups_members (group_id, user_id, approved) VALUES (?, ?, '1')`, [group.group_id, me]);
-    }
-    await conn.query(`UPDATE groups SET group_members = group_members + 1 WHERE group_id=?`, [group.group_id]);
+    await conn.query(`DELETE FROM pages_invites WHERE id=?`, [inviteId]);
+    await conn.query(`INSERT IGNORE INTO pages_admins (page_id, user_id) VALUES (?, ?)`, [page.page_id, me]);
 
     await conn.commit();
-    res.json({ ok: true, isMember: true });
+    res.json({ ok: true });
   } catch (e) {
     await conn.rollback();
-    console.error('[POST /groups/:id/invites/:inv/accept]', e);
+    console.error('[POST /pages/:id/invites/:inv/accept]', e);
     res.status(500).json({ error: 'Failed to accept invite' });
   } finally { conn.release(); }
 });
@@ -464,24 +432,24 @@ router.post('/:idOrName/invites/:inviteId/decline', ensureAuth, async (req, res)
   const idOrName = req.params.idOrName;
   const conn = await pool.getConnection();
   try {
-    const group = await getGroupByIdOrName(idOrName, conn);
-    if (!group) return res.status(404).json({ error: 'Group not found' });
+    const page = await getPageByIdOrName(idOrName, conn);
+    if (!page) return res.status(404).json({ error: 'Page not found' });
 
     const [[inv]] = await conn.query(
-      `SELECT id FROM groups_invites WHERE id=? AND group_id=? AND user_id=? LIMIT 1`,
-      [inviteId, group.group_id, me]
+      `SELECT id FROM pages_invites WHERE id=? AND page_id=? AND user_id=? LIMIT 1`,
+      [inviteId, page.page_id, me]
     );
     if (!inv) return res.status(404).json({ error: 'Invite not found' });
 
-    await conn.query(`DELETE FROM groups_invites WHERE id=?`, [inviteId]);
+    await conn.query(`DELETE FROM pages_invites WHERE id=?`, [inviteId]);
     res.json({ ok: true });
   } catch (e) {
-    console.error('[POST /groups/:id/invites/:inv/decline]', e);
+    console.error('[POST /pages/:id/invites/:inv/decline]', e);
     res.status(500).json({ error: 'Failed to decline invite' });
   } finally { conn.release(); }
 });
 
-/* ============================== GROUP POSTS ============================== */
+/* ============================== PAGE POSTS ============================== */
 router.get('/:idOrName/posts', ensureAuth, async (req, res) => {
   const idOrName = req.params.idOrName;
   const limit = Math.min(25, Math.max(5, Number(req.query.limit) || 10));
@@ -489,19 +457,19 @@ router.get('/:idOrName/posts', ensureAuth, async (req, res) => {
 
   const conn = await pool.getConnection();
   try {
-    const group = await getGroupByIdOrName(idOrName, conn);
-    if (!group) return res.status(404).json({ error: 'Group not found' });
+    const page = await getPageByIdOrName(idOrName, conn);
+    if (!page) return res.status(404).json({ error: 'Page not found' });
 
-    const params = [group.group_id];
-    let where = `p.in_group = ? AND p.is_hidden='0'`;
+    const params = [page.page_id];
+    let where = `p.user_id = ? AND p.user_type = 'page' AND p.is_hidden='0'`;
     if (cursor) { where += ` AND p.post_id < ?`; params.push(cursor); }
 
     const [rows] = await conn.query(
       `
       SELECT p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
-             u.user_name, u.user_firstname, u.user_lastname, u.user_picture
+             pg.page_name, pg.page_title, pg.page_picture
         FROM posts p
-        JOIN users u ON u.user_id = p.user_id
+        JOIN pages pg ON pg.page_id = p.user_id
        WHERE ${where}
        ORDER BY p.post_id DESC
        LIMIT ${limit}
@@ -535,24 +503,28 @@ router.get('/:idOrName/posts', ensureAuth, async (req, res) => {
       ).then(([r]) => r),
     ]);
 
-    const byId = new Map(rows.map(r => [r.post_id, ({
-      id: String(r.post_id),
-      author: {
-        id: String(r.user_id),
-        username: r.user_name,
-        fullName: [r.user_firstname, r.user_lastname].filter(Boolean).join(' ') || r.user_name,
-        profileImage: r.user_picture || null,
-        type: 'user'
-      },
-      content: r.text || '',
-      createdAt: r.time,
-      privacy: r.privacy,
-      shares: r.shares,
-      images: [],
-      videos: [],
-      likes: [],
-      comments: []
-    })]));
+    function makePost(r) {
+      return {
+        id: String(r.post_id),
+        author: {
+          id: String(r.user_id),
+          username: r.page_name,
+          fullName: r.page_title || r.page_name,
+          profileImage: r.page_picture || null,
+          type: 'page'
+        },
+        content: r.text || '',
+        createdAt: r.time,
+        privacy: r.privacy,
+        shares: r.shares,
+        images: [],
+        videos: [],
+        likes: [],
+        comments: []
+      };
+    }
+
+    const byId = new Map(rows.map(r => [r.post_id, makePost(r)]));
 
     for (const m of mediaRows) if (m.source_type === 'image') byId.get(m.post_id)?.images.push(m.source_url);
     for (const ph of photoRows) byId.get(ph.post_id)?.images.push(ph.source);
@@ -572,9 +544,11 @@ router.get('/:idOrName/posts', ensureAuth, async (req, res) => {
 
     res.json({ items, nextCursor });
   } catch (e) {
-    console.error('[GET /groups/:id/posts]', e);
+    console.error('[GET /pages/:id/posts]', e);
     res.status(500).json({ error: 'Failed to load posts' });
-  } finally { conn.release(); }
+  } finally {
+    conn.release();
+  }
 });
 
 router.post('/:idOrName/posts', ensureAuth, async (req, res) => {
@@ -586,21 +560,18 @@ router.post('/:idOrName/posts', ensureAuth, async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    const group = await getGroupByIdOrName(idOrName, conn);
-    if (!group) { await conn.rollback(); return res.status(404).json({ error: 'Group not found' }); }
+    const page = await getPageByIdOrName(idOrName, conn);
+    if (!page) { await conn.rollback(); return res.status(404).json({ error: 'Page not found' }); }
 
-    // Only members can post; if approval enabled, hide until approved
-    const membership = await isGroupMember(me, group.group_id, conn);
-    if (!membership?.approved) { await conn.rollback(); return res.status(403).json({ error: 'Join to post' }); }
-
-    const hidden = group.group_publish_approval_enabled === '1' ? '1' : '0';
+    const admin = (page.page_admin === me) || (await isPageAdmin(me, page.page_id, conn));
+    if (!admin) { await conn.rollback(); return res.status(403).json({ error: 'Forbidden' }); }
 
     const [ins] = await conn.query(
       `INSERT INTO posts
          (user_id, user_type, post_type, time, privacy, text, is_hidden, in_group, in_event, in_wall,
           reaction_like_count, comments, shares)
-       VALUES (?, 'user', 'status', NOW(), 'public', ?, ?, ?, '0', '0', 0, 0, 0)`,
-      [me, content || null, hidden, group.group_id]
+       VALUES (?, 'page', 'status', NOW(), 'public', ?, '0', '0', '0', '0', 0, 0, 0)`,
+      [page.page_id, content || null]
     );
     const postId = ins.insertId;
 
@@ -622,12 +593,14 @@ router.post('/:idOrName/posts', ensureAuth, async (req, res) => {
     }
 
     await conn.commit();
-    res.status(201).json({ postId, hidden: hidden === '1' });
+    res.status(201).json({ postId });
   } catch (e) {
     await conn.rollback();
-    console.error('[POST /groups/:id/posts]', e);
-    res.status(500).json({ error: 'Failed to create group post' });
-  } finally { conn.release(); }
+    console.error('[POST /pages/:id/posts]', e);
+    res.status(500).json({ error: 'Failed to create page post' });
+  } finally {
+    conn.release();
+  }
 });
 
 module.exports = router;
