@@ -165,7 +165,7 @@ router.get('/:userId/posts', ensureAuth, async (req, res) => {
       const [rows] = await conn.query(
         `
         SELECT
-          p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+          p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,p.boosted,p.boosted_at,
           u.user_name,
           u.user_firstname,
           u.user_lastname,
@@ -242,6 +242,8 @@ router.get('/:userId/posts', ensureAuth, async (req, res) => {
       function makePost(r) {
         return {
           id: String(r.post_id),
+          boosted: r.boosted,
+          boosted_at: r.boosted_at,
           author: {
             id: String(r.user_id),
             username: r.user_name,
