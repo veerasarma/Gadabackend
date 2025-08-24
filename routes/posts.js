@@ -149,34 +149,45 @@ router.get('/', ensureAuth, async (req, res) => {
   try {
     // 1) Pull top posts by computed score
     const [posts] = await pool.promise().query(`
-      SELECT
+        SELECT
         p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
         p.reaction_like_count, p.comments,
-        p.boosted, p.boosted_at,                -- carry through (used by UI if needed)
+        p.boosted, p.boosted_at,
         IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
         u.user_picture AS authorProfileImage,
 
-        /* optional: expose individual components for debugging/analytics */
+        /* bucket: currently boosted (48h) gets priority */
+        CASE
+        WHEN p.boosted = '1'
+        AND p.boosted_at IS NOT NULL
+        AND p.boosted_at >= (NOW() - INTERVAL 48 HOUR)
+        THEN 1 ELSE 0
+        END AS boost_priority,
+
+        /* components (unchanged) */
         TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
         (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
 
-        /* final rank score: recency + engagement + boost (48h decay, floor 0.3 in window) */
+        /* your score (unchanged) */
         (
-          (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
-          (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5))) +
-          CASE
-            WHEN p.boosted = '1'
-             AND p.boosted_at IS NOT NULL
-             AND TIMESTAMPDIFF(HOUR, p.boosted_at, NOW()) < 48
-            THEN 2.5 * GREATEST(0.3, 1 - (TIMESTAMPDIFF(HOUR, p.boosted_at, NOW()) / 48))
-            ELSE 0
-          END
+        (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
+        (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5))) +
+        CASE
+        WHEN p.boosted = '1'
+          AND p.boosted_at IS NOT NULL
+          AND TIMESTAMPDIFF(HOUR, p.boosted_at, NOW()) < 48
+        THEN 2.5 * GREATEST(0.3, 1 - (TIMESTAMPDIFF(HOUR, p.boosted_at, NOW()) / 48))
+        ELSE 0
+        END
         ) AS score
-      FROM posts p
-      JOIN users u ON u.user_id = p.user_id
-      WHERE p.is_hidden = '0'
-      ORDER BY score DESC
-      LIMIT 100
+
+        FROM posts p
+        JOIN users u ON u.user_id = p.user_id
+        WHERE p.is_hidden = '0'
+
+        /* KEY CHANGE: boosted-in-window first, then score */
+        ORDER BY boost_priority DESC, score DESC
+        LIMIT 100;
     `);
 
     if (!posts.length) return res.json([]);
