@@ -180,7 +180,7 @@ router.get('/', ensureAuth, async (req, res) => {
     `);
 
     if (!posts.length) return res.json([]);
-
+      console.log(posts,'posts')
     const postIds = posts.map(p => p.post_id);
 
     // 2–6) fetch related in parallel (unchanged)
