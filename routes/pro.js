@@ -3,6 +3,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');                  // mysql2/promise pool
 const { ensureAuth } = require('../middlewares/auth'); // your JWT guard
+const { checkActivePackage } = require("../services/packageService");
+
 
 /**
  * GET /api/pro/users?limit=12
@@ -80,6 +82,60 @@ router.get("/trending", async (req, res) => {
     } catch (err) {
       console.error(err);
       res.status(500).json({ success: false, error: "Server error" });
+    }
+  });
+
+
+  router.get("/activepackage",ensureAuth, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const result = await checkActivePackage(userId);
+
+      res.json({ success: true, data: result });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ success: false, error: "Server error" });
+    }
+  });
+
+  router.get('/pages', ensureAuth, async (req, res) => {
+    const limit = Math.min(30, Math.max(1, Number(req.query.limit) || 12));
+  
+    try {
+      const [rows] = await pool.query(
+        `
+        SELECT
+          p.page_id,
+          p.page_name,
+          p.page_title,
+          p.page_picture,
+          p.page_likes,
+          p.page_date
+        FROM pages p
+        WHERE p.page_boosted = '1' AND p.is_fake = '0'
+        ORDER BY p.page_likes DESC, p.page_date DESC
+        LIMIT ?
+        `,
+        [limit]
+      );
+  
+      // Normalize for the frontend { id, name, avatar }
+      const items = rows.map(r => {
+        const name = (r.page_title && r.page_title.trim()) ? r.page_title : r.page_name;
+        // DB stores paths like "photos/2025/01/..."; frontend will prefix with /uploads
+        const avatar = r.page_picture || 'profile/defaultavatar.png';
+        return {
+          id: r.page_id,
+          name,
+          avatar,        // keep raw; client will build `${API}/uploads/${avatar}`
+          likes: Number(r.page_likes || 0),
+        };
+      });
+  
+      res.json({ items });
+    } catch (e) {
+      console.error('[GET /pro/pages]', e);
+      res.status(500).json({ error: 'Failed to load boosted pages' });
     }
   });
 

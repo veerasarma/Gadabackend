@@ -44,6 +44,7 @@ const adminRepresentativesRoutes = require("./routes/adminRepresentatives");
 const adminBankTransfersRoutes = require("./routes/adminBankTransfers");
 const pagesRoutes = require('./routes/pages');
 const eventsRoutes = require('./routes/events');
+const watchRoutes = require('./routes/watch');
 
 
 const app = express();
@@ -139,6 +140,7 @@ app.use('/api/hashtag', hashtagRoutes);
 app.use('/api/messenger', messengerRoutes);
 app.use('/api/pages', pagesRoutes);
 app.use('/api/events', eventsRoutes);
+app.use('/api/watch', watchRoutes);
 app.use('/api', initRoute);
 app.use('/api', authRoutes);
 app.use("/api/admin/bank-transfers", adminBankTransfersRoutes);

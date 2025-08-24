@@ -5,6 +5,7 @@ const fs = require('fs');
 const multer = require('multer');
 const pool = require('../config/db');
 const { ensureAuth } = require('../middlewares/auth');
+const { checkActivePackage } = require('../services/packageService');
 
 const router = express.Router();
 
@@ -46,6 +47,7 @@ async function isPageAdmin(userId, pageId, conn) {
   );
   return !!row;
 }
+
 
 /* ============================== CATEGORIES ============================== */
 router.get('/categories', ensureAuth, async (_req, res) => {
@@ -140,7 +142,7 @@ router.get('/', ensureAuth, async (req, res) => {
     const [rows] = await conn.query(
       `
       SELECT p.page_id, p.page_name, p.page_title, p.page_picture, p.page_cover,
-             p.page_category, p.page_country, p.page_likes, p.page_date
+             p.page_category, p.page_country, p.page_likes, p.page_date,p.page_boosted, p.page_boosted_by
         ${fromSql}
         ${whereSql}
         ${orderSql}
@@ -209,6 +211,8 @@ router.get('/:idOrName', ensureAuth, async (req, res) => {
         id: page.page_id,
         name: page.page_name,
         title: page.page_title,
+        page_boosted: page.page_boosted,
+        page_boosted_by: page.page_boosted_by,
         picture: page.page_picture,
         cover: page.page_cover,
         categoryId: page.page_category,
@@ -598,6 +602,115 @@ router.post('/:idOrName/posts', ensureAuth, async (req, res) => {
     await conn.rollback();
     console.error('[POST /pages/:id/posts]', e);
     res.status(500).json({ error: 'Failed to create page post' });
+  } finally {
+    conn.release();
+  }
+});
+
+
+async function resolvePage(conn, idOrHandle) {
+  if (!idOrHandle) return null;
+  // numeric id?
+  if (/^\d+$/.test(String(idOrHandle))) {
+    const [[row]] = await conn.query(
+      `SELECT page_id, page_name, page_boosted, page_boosted_by
+         FROM pages WHERE page_id=? LIMIT 1`,
+      [Number(idOrHandle)]
+    );
+    return row || null;
+  }
+  // treat as handle (page_name)
+  const [[row]] = await conn.query(
+    `SELECT page_id, page_name, page_boosted, page_boosted_by
+       FROM pages WHERE page_name=? LIMIT 1`,
+    [String(idOrHandle)]
+  );
+  return row || null;
+}
+
+
+/** POST /pages/:idOrHandle/boost  -> boost a page */
+router.post('/:idOrHandle/boost', ensureAuth, async (req, res) => {
+  const userId = Number(req.user.userId);
+  const idOrHandle = req.params.idOrHandle;
+
+  const conn = await pool.getConnection();
+  try {
+    const page = await resolvePage(conn, idOrHandle);
+    if (!page) return res.status(404).json({ error: 'Page not found' });
+
+    const admin = await isPageAdmin(userId,page.page_id,conn);
+    if (!admin) return res.status(403).json({ error: 'Only admins can boost a page' });
+
+    // package & quota check
+    const info = await checkActivePackage(userId);
+    if (!info.active) return res.status(403).json({ error: 'Upgrade your package to boost pages' });
+
+    const enabled = !!info.benefits?.boostPagesEnabled;
+    const remaining = Number(info.usage?.boostedPagesRemaining || 0);
+    if (!enabled || remaining <= 0) {
+      return res.status(403).json({ error: 'You reached the maximum number of boosted pages for your package' });
+    }
+
+    if (String(page.page_boosted) === '1') {
+      return res.json({ boosted: true }); // already boosted
+    }
+
+    await conn.beginTransaction();
+    await conn.query(
+      `UPDATE pages SET page_boosted='1', page_boosted_by=? WHERE page_id=? AND page_boosted<>'1'`,
+      [userId, page.page_id]
+    );
+    await conn.query(
+      `UPDATE users SET user_boosted_pages = user_boosted_pages + 1 WHERE user_id=?`,
+      [userId]
+    );
+    await conn.commit();
+
+    res.json({ boosted: true });
+  } catch (e) {
+    await conn.rollback();
+    console.error('[POST /pages/:id/boost]', e);
+    res.status(500).json({ error: 'Failed to boost page' });
+  } finally {
+    conn.release();
+  }
+});
+
+/** DELETE /pages/:idOrHandle/boost  -> unboost a page */
+router.delete('/:idOrHandle/boost', ensureAuth, async (req, res) => {
+  const userId = Number(req.user.userId);
+  const idOrHandle = req.params.idOrHandle;
+
+  const conn = await pool.getConnection();
+  try {
+    const page = await resolvePage(conn, idOrHandle);
+    if (!page) return res.status(404).json({ error: 'Page not found' });
+
+    const admin = await isPageAdmin(userId,page.page_id,conn);
+    if (!admin) return res.status(403).json({ error: 'Only admins can unboost a page' });
+
+    if (String(page.page_boosted) !== '1') {
+      return res.json({ boosted: false }); // already not boosted
+    }
+
+    await conn.beginTransaction();
+    await conn.query(
+      `UPDATE pages SET page_boosted='0', page_boosted_by=NULL WHERE page_id=?`,
+      [page.page_id]
+    );
+    // keep counter non-negative
+    await conn.query(
+      `UPDATE users SET user_boosted_pages = GREATEST(user_boosted_pages - 1, 0) WHERE user_id=?`,
+      [userId]
+    );
+    await conn.commit();
+
+    res.json({ boosted: false });
+  } catch (e) {
+    await conn.rollback();
+    console.error('[DELETE /pages/:id/boost]', e);
+    res.status(500).json({ error: 'Failed to unboost page' });
   } finally {
     conn.release();
   }

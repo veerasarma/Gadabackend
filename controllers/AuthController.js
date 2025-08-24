@@ -21,6 +21,7 @@ const { ValidationException, BadRequestException } = require("../utils/errors");
 const { getEmailTemplate } = require("../utils/emailTemplate");
 const { v4: uuid } = require("uuid");
 const { getClientIp, parseUserAgent } = require('../utils/clientInfo');
+const { checkActivePackage } = require("../services/packageService");
 
 exports.getProfile = (req, res) => {
   const user = req.user;
@@ -754,6 +755,9 @@ exports.signIn = async (req, res, next) => {
       console.log(roles,'rolesrolesroles')
       const payload = { userId: user.user_id,email: user.email, roles };
       user.role = roles;
+
+      const pkg = await checkActivePackage(user.user_id).catch(() => ({ active: false }));
+      user.packageactive = pkg.active;
 
     const token = jwt.sign(payload, process.env.JWT_SECRET, {
       expiresIn: remember ? "30d" : "1d",

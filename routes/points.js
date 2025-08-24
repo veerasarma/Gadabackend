@@ -61,6 +61,7 @@ router.get('/overview', ensureAuth, async (req, res, next)=> {
     // Fallbacks are safe defaults if a key is missing.
     const sys = (req.system) || {};
     const result = await checkActivePackage(userId);
+    console.log(result,userId)
     let daily_limit = (result.active)?sys.points_limit_pro:sys.points_limit_user ?? 1000
     const rules = {
       post_create: Number(sys.points_per_post ?? 10),
