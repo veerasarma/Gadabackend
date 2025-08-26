@@ -1,7 +1,7 @@
 const express = require('express');
 const { query, body, param, validationResult } = require('express-validator');
-const  db  = require('../config/db'); // adjust to your pool path
-const { ensureAuth, requireRole } = require('../middlewares/auth');
+const  db  = require('../config/db'); // adjust to your db path
+const { ensureAuth, requireRole,requireAdmin } = require('../middlewares/auth');
 
 const router = express.Router();
 router.use(ensureAuth, requireRole('admin'));
@@ -186,7 +186,7 @@ router.patch('/users/:id/role',
     const { id } = req.params; const { role } = req.body;
 
     // Variant 1 (ENUM):
-    // await pool.query(`UPDATE users SET role=? WHERE user_id=?`, [role, id]);
+    // await db.query(`UPDATE users SET role=? WHERE user_id=?`, [role, id]);
 
     // Variant 2 (roles table):
     const [[roleRow]] = await db.query(`SELECT role_id FROM roles WHERE name=?`, [role]);
@@ -210,10 +210,162 @@ router.patch('/users/:id/suspend',
 );
 
 // Basic stats
-router.get('/stats', async (_req, res) => {
-  const [[u]] = await db.query(`SELECT COUNT(*) AS users FROM users`);
-  const [[p]] = await db.query(`SELECT COUNT(*) AS posts FROM posts`);
-  res.json({ users: u.users, posts: p.posts });
+// router.get('/stats', async (_req, res) => {
+//   const [[u]] = await db.query(`SELECT COUNT(*) AS users FROM users`);
+//   const [[p]] = await db.query(`SELECT COUNT(*) AS posts FROM posts`);
+//   res.json({ users: u.users, posts: p.posts });
+// });
+
+// ---- Table/column map (edit here to fit your schema) ----
+const T = {
+  users: {
+    table: "users",
+    dateCol: "user_registered",
+    isUnix: true,
+    cols: {
+      banned: "user_banned",
+      activated: "user_activated",
+      status: "user_approved",
+      lastseen: "user_last_seen",
+      onlineFlag: "user_is_online",
+    },
+  },
+  posts:        { table: "posts",                   dateCol: "time",            isUnix: true },
+  pages:        { table: "pages",                   dateCol: "page_date",       isUnix: true },
+  groups:       { table: "groups",                  dateCol: "group_date",      isUnix: true },
+  events:       { table: "events",                  dateCol: "event_date",      isUnix: true },
+  comments:     { table: "posts_comments",          dateCol: "time",            isUnix: true },
+  messages:     { table: "conversations_messages",  dateCol: "time",            isUnix: true },
+  notifications:{ table: "notifications",           dateCol: "time",            isUnix: true },
+
+  // Optional: if you track site visits, fill these and set isUnix accordingly.
+  // visits: { table: "site_visits", dateCol: "time", isUnix: true },
+};
+
+// --- helpers ---
+const dateExpr = (col, isUnix) => (isUnix ? `FROM_UNIXTIME(${col})` : col);
+
+async function countSafe(sql, params = []) {
+  try {
+    const [rows] = await db.query(sql, params);
+    const v = rows?.[0] && (rows[0].c ?? rows[0].count ?? Object.values(rows[0])[0]);
+    return Number(v || 0);
+  } catch (e) {
+    console.error("countSafe error:", e);
+    return 0;
+  }
+}
+
+async function monthlyCount({ table, dateCol, isUnix }, year) {
+  const d = dateExpr(dateCol, isUnix);
+  try {
+    const [rows] = await db.query(
+      `SELECT MONTH(${d}) AS m, COUNT(*) AS c
+         FROM ${table}
+        WHERE YEAR(${d}) = ?
+        GROUP BY MONTH(${d})`,
+      [year]
+    );
+    const arr = Array(12).fill(0);
+    for (const r of rows) arr[(Number(r.m) || 1) - 1] = Number(r.c || 0);
+    return arr;
+  } catch (e) {
+    console.error("monthlyCount error:", table, e);
+    return Array(12).fill(0);
+  }
+}
+
+// ----------------- KPI endpoint -----------------
+router.get("/stats", ensureAuth, requireAdmin, async (_req, res) => {
+  try {
+    // Users
+    const U = T.users;
+
+    const totalUsers = await countSafe(`SELECT COUNT(*) AS c FROM ${U.table}`);
+
+    // user_is_online = 1 (preferred)
+    let online = 0;
+    // let online = await countSafe(
+    //   `SELECT COUNT(*) AS c FROM ${U.table} WHERE ${U.cols.onlineFlag} = 1`
+    // );
+    // fallback: last seen within 5 minutes
+    if (online === 0) {
+      const lastSeenExpr = dateExpr(U.cols.lastseen, true);
+      online = await countSafe(
+        `SELECT COUNT(*) AS c
+           FROM ${U.table}
+          WHERE ${U.cols.lastseen} IS NOT NULL
+            AND TIMESTAMPDIFF(MINUTE, ${lastSeenExpr}, NOW()) <= 5`
+      );
+    }
+
+    // pending = not approved
+    const pendingUsers = await countSafe(
+      `SELECT COUNT(*) AS c FROM ${U.table} WHERE ${U.cols.status} = 0`
+    );
+
+    // not activated
+    const notActivated = await countSafe(
+      `SELECT COUNT(*) AS c FROM ${U.table} WHERE ${U.cols.activated} = 0`
+    );
+
+    // banned
+    const banned = await countSafe(
+      `SELECT COUNT(*) AS c FROM ${U.table} WHERE ${U.cols.banned} = 1`
+    );
+
+    // Content counts
+    const posts   = await countSafe(`SELECT COUNT(*) AS c FROM ${T.posts.table}`);
+    const comments= await countSafe(`SELECT COUNT(*) AS c FROM ${T.comments.table}`);
+    const pages   = await countSafe(`SELECT COUNT(*) AS c FROM ${T.pages.table}`);
+    const groups  = await countSafe(`SELECT COUNT(*) AS c FROM ${T.groups.table}`);
+    const events  = await countSafe(`SELECT COUNT(*) AS c FROM ${T.events.table}`);
+    const messages= await countSafe(`SELECT COUNT(*) AS c FROM ${T.messages.table}`);
+    const notifs  = await countSafe(`SELECT COUNT(*) AS c FROM ${T.notifications.table}`);
+
+    // Visits (optional; return zeros if you don't track)
+    let totalVisits = 0, todayVisits = 0, monthVisits = 0;
+    if (T.visits) {
+      const V = T.visits;
+      const d = dateExpr(V.dateCol, !!V.isUnix);
+      totalVisits = await countSafe(`SELECT COUNT(*) AS c FROM ${V.table}`);
+      todayVisits = await countSafe(`SELECT COUNT(*) AS c FROM ${V.table} WHERE DATE(${d}) = CURDATE()`);
+      monthVisits = await countSafe(
+        `SELECT COUNT(*) AS c
+           FROM ${V.table}
+          WHERE YEAR(${d}) = YEAR(CURDATE())
+            AND MONTH(${d}) = MONTH(CURDATE())`
+      );
+    }
+
+    res.json({
+      totalUsers, online, pendingUsers, notActivated, banned,
+      totalVisits, todayVisits, monthVisits,
+      posts, comments, pages, groups, events, messages, notifications: notifs,
+    });
+  } catch (e) {
+    console.error("GET /api/admin/stats error:", e);
+    res.status(500).json({ error: "Failed to load admin stats" });
+  }
+});
+
+// -------------- Monthly chart endpoint --------------
+router.get("/stats/monthly", ensureAuth, requireAdmin, async (req, res) => {
+  try {
+    const year = Number(req.query.year || new Date().getFullYear());
+    const data = {
+      year,
+      users:  await monthlyCount(T.users,  year),
+      pages:  await monthlyCount(T.pages,  year),
+      groups: await monthlyCount(T.groups, year),
+      events: await monthlyCount(T.events, year),
+      posts:  await monthlyCount(T.posts,  year),
+    };
+    res.json(data);
+  } catch (e) {
+    console.error("GET /api/admin/stats/monthly error:", e);
+    res.status(500).json({ error: "Failed to load monthly chart data" });
+  }
 });
 
 module.exports = router;

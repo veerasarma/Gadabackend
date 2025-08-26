@@ -156,6 +156,13 @@ app.use('/api/admin/group-categories', require('./routes/admin/groupCategories')
 app.use('/api/admin/events', require('./routes/admin/adminEvents'));
 app.use('/api/admin/events-categories',require('./routes/admin/adminEventCategories'));
 app.use("/api/admin/payment-settings", require("./routes/admin/adminPaymentSettings"));
+app.use("/api/admin/wallet-settings", require("./routes/admin/adminWalletSettings"));
+app.use("/api/admin/earnings/packages", require("./routes/admin/adminPackagesEarnings"));
+app.use("/api/admin/packages", require("./routes/admin/adminPackages"));
+app.use("/api/admin/subscribers", require("./routes/admin/adminSubscribers"));
+app.use("/api/admin/settings/points", require("./routes/admin/adminPointsSettings"));
+
+
 
 app.get("/", (_req, res) => res.send("API is running"));
 
