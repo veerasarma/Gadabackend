@@ -66,6 +66,7 @@ const upload = multer({
 // POST /api/payments/initialize
 // body: { email, amount, metadata?: { userId, orderId, ... } }
 router.post("/initialize", async (req, res, next) => {
+  console.log(req.system.paystack_secret);
   const { email, amount, metadata } = req.body;
   try {
     const response = await axios.post(
@@ -78,7 +79,7 @@ router.post("/initialize", async (req, res, next) => {
       },
       {
         headers: {
-          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+          Authorization: `Bearer ${req.system.paystack_secret}`,
           "Content-Type": "application/json",
         },
       }
@@ -100,7 +101,7 @@ function verifySignature(req) {
     : Buffer.from(JSON.stringify(req.body || {}));
 
   const computedHex = crypto
-    .createHmac('sha512', PAYSTACK_SECRET_KEY)
+    .createHmac('sha512', req.system.paystack_secret)
     .update(bodyBuf)
     .digest('hex');
 
