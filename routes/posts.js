@@ -145,8 +145,157 @@ function mapPostRow(p) {
 //   }
 // });
 
+// router.get('/', ensureAuth, async (req, res) => {
+//   try {
+//     const withPromoted = String(req.query.withPromoted || '0') === '1';
+
+//     // A) boosted pool (48h window)
+//     const [boostedRows] = await pool.promise().query(`
+//       SELECT
+//         p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+//         p.reaction_like_count, p.comments,
+//         p.boosted, p.boosted_at,
+//         IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+//         u.user_picture AS authorProfileImage
+//       FROM posts p
+//       JOIN users u ON u.user_id = p.user_id
+//       WHERE p.is_hidden = '0'
+//         AND p.boosted = '1'
+//         AND p.boosted_at IS NOT NULL
+//         AND p.boosted_at >= (NOW() - INTERVAL 48 HOUR)
+//       ORDER BY p.boosted_at DESC
+//       LIMIT 50
+//     `);
+
+//     // Pick ONE boosted at random (if any)
+//     let promoted = null;
+//     if (boostedRows.length > 0) {
+//       promoted = boostedRows[Math.floor(Math.random() * boostedRows.length)];
+//     }
+
+//     // B) main feed (exclude boosted-in-window), score = recency + engagement (no boost term)
+//     const [rows] = await pool.promise().query(`
+//       SELECT
+//         p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+//         p.reaction_like_count, p.comments,
+//         p.boosted, p.boosted_at,
+//         IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+//         u.user_picture AS authorProfileImage,
+
+//         TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
+//         (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
+
+//         (
+//           (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
+//           (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
+//         ) AS score
+
+//       FROM posts p
+//       JOIN users u ON u.user_id = p.user_id
+//       WHERE p.is_hidden = '0'
+//         AND NOT (
+//           p.boosted = '1' AND p.boosted_at IS NOT NULL
+//           AND p.boosted_at >= (NOW() - INTERVAL 48 HOUR)
+//         )
+//       ORDER BY score DESC
+//       LIMIT 100
+//     `);
+
+//     // If nothing at all, return empty in either format
+//     if (!rows.length && !promoted) {
+//       return withPromoted ? res.json({ promoted: null, items: [] }) : res.json([]);
+//     }
+
+//     // Collect ids for stitching (include promoted if present)
+//     const postIds = rows.map(p => p.post_id);
+//     if (promoted) postIds.push(promoted.post_id);
+
+//     // 2–6) fetch related in parallel (unchanged)
+//     const [mediaRows, videoRows, photoRows, likeRows, commentRows] = await Promise.all([
+//       pool.promise().query(
+//         `SELECT post_id, source_url, source_type
+//            FROM posts_media
+//           WHERE post_id IN (?)`, [postIds]
+//       ).then(([r]) => r),
+
+//       pool.promise().query(
+//         `SELECT post_id, source
+//            FROM posts_videos
+//           WHERE post_id IN (?)`, [postIds]
+//       ).then(([r]) => r),
+
+//       pool.promise().query(
+//         `SELECT post_id, album_id, source
+//            FROM posts_photos
+//           WHERE post_id IN (?)`, [postIds]
+//       ).then(([r]) => r),
+
+//       pool.promise().query(
+//         `SELECT r.post_id, r.user_id, u.user_name
+//            FROM posts_reactions r
+//            JOIN users u ON u.user_id = r.user_id
+//           WHERE r.post_id IN (?) AND r.reaction = 'like'`, [postIds]
+//       ).then(([r]) => r),
+
+//       pool.promise().query(
+//         `SELECT c.comment_id, c.node_id AS post_id, c.user_id, c.text, c.time,
+//                 u.user_name, u.user_picture AS profileImage
+//            FROM posts_comments c
+//            JOIN users u ON u.user_id = c.user_id
+//           WHERE c.node_type = 'post' AND c.node_id IN (?)
+//           ORDER BY c.time ASC`, [postIds]
+//       ).then(([r]) => r),
+//     ]);
+    
+
+//     // 7) stitch (preserve helpers, but keep boosted flags!)
+//     const byId = new Map(
+//       rows.map(p => [p.post_id, mapPostRow(p)])
+//     );
+//     if (promoted && !byId.has(promoted.post_id)) {
+//       byId.set(promoted.post_id, mapPostRow(promoted));
+//     }
+
+//     for (const m of mediaRows) {
+//       if (m.source_type === 'image') byId.get(m.post_id)?.images.push(m.source_url);
+//     }
+//     for (const p of photoRows) byId.get(p.post_id)?.images.push(p.source);
+//     for (const v of videoRows) byId.get(v.post_id)?.videos.push(v.source);
+//     for (const l of likeRows) {
+//       byId.get(l.post_id)?.likes.push({ userId: String(l.user_id), username: l.user_name });
+//     }
+//     for (const c of commentRows) {
+//       const post = byId.get(c.post_id);
+//       if (post) {
+//         post.comments.push({
+//           id: String(c.comment_id),
+//           userId: String(c.user_id),
+//           username: c.user_name,
+//           profileImage: c.profileImage || null,
+//           content: c.text,
+//           createdAt: c.time,
+//         });
+//       }
+//     }
+
+//     // Output
+//     if (withPromoted) {
+//       const promotedOut = promoted ? byId.get(promoted.post_id) : null;
+//       const itemsOut = rows.map(p => byId.get(p.post_id)); // keep ranking order
+//       return res.json({ promoted: promotedOut, items: itemsOut });
+//     } else {
+//       // backward compatible: return plain array (just the main list)
+//       return res.json(rows.map(p => byId.get(p.post_id)));
+//     }
+//   } catch (err) {
+//     console.error('[GET /posts]', err);
+//     res.status(500).json({ error: 'Failed to fetch posts' });
+//   }
+// });
+
 router.get('/', ensureAuth, async (req, res) => {
   try {
+    const userId = Number(req.user?.userId || 0);           // for myReaction / hasViewed
     const withPromoted = String(req.query.withPromoted || '0') === '1';
 
     // A) boosted pool (48h window)
@@ -173,7 +322,7 @@ router.get('/', ensureAuth, async (req, res) => {
       promoted = boostedRows[Math.floor(Math.random() * boostedRows.length)];
     }
 
-    // B) main feed (exclude boosted-in-window), score = recency + engagement (no boost term)
+    // B) main feed (exclude boosted-in-window)
     const [rows] = await pool.promise().query(`
       SELECT
         p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
@@ -210,8 +359,12 @@ router.get('/', ensureAuth, async (req, res) => {
     const postIds = rows.map(p => p.post_id);
     if (promoted) postIds.push(promoted.post_id);
 
-    // 2–6) fetch related in parallel (unchanged)
-    const [mediaRows, videoRows, photoRows, likeRows, commentRows] = await Promise.all([
+    // 2–? ) fetch related in parallel (ADDED 2 extra queries for VIEWS)
+    const [
+      mediaRows, videoRows, photoRows, likeRows, commentRows,
+      reactAggRows, myReactRows,
+      viewAggRows, viewMineRows
+    ] = await Promise.all([
       pool.promise().query(
         `SELECT post_id, source_url, source_type
            FROM posts_media
@@ -230,6 +383,7 @@ router.get('/', ensureAuth, async (req, res) => {
           WHERE post_id IN (?)`, [postIds]
       ).then(([r]) => r),
 
+      // existing "likes" fetch (for backward compat / older UI):
       pool.promise().query(
         `SELECT r.post_id, r.user_id, u.user_name
            FROM posts_reactions r
@@ -245,12 +399,40 @@ router.get('/', ensureAuth, async (req, res) => {
           WHERE c.node_type = 'post' AND c.node_id IN (?)
           ORDER BY c.time ASC`, [postIds]
       ).then(([r]) => r),
+
+      // aggregated reactions per post (all types)
+      pool.promise().query(
+        `SELECT post_id, reaction, COUNT(*) AS c
+           FROM posts_reactions
+          WHERE post_id IN (?)
+          GROUP BY post_id, reaction`, [postIds]
+      ).then(([r]) => r),
+
+      // the current viewer's reaction per post
+      pool.promise().query(
+        `SELECT post_id, reaction
+           FROM posts_reactions
+          WHERE post_id IN (?) AND user_id = ?`, [postIds, userId || -1]
+      ).then(([r]) => r),
+
+      // ---- NEW: total views per post
+      pool.promise().query(
+        `SELECT post_id, COUNT(*) AS views
+           FROM posts_views
+          WHERE post_id IN (?)
+          GROUP BY post_id`, [postIds]
+      ).then(([r]) => r),
+
+      // ---- NEW: which posts the current user has viewed
+      pool.promise().query(
+        `SELECT post_id
+           FROM posts_views
+          WHERE post_id IN (?) AND user_id = ?`, [postIds, userId || -1]
+      ).then(([r]) => r),
     ]);
 
-    // 7) stitch (preserve helpers, but keep boosted flags!)
-    const byId = new Map(
-      rows.map(p => [p.post_id, mapPostRow(p)])
-    );
+    // 8) stitch (preserve helpers, but keep boosted flags!)
+    const byId = new Map(rows.map(p => [p.post_id, mapPostRow(p)]));
     if (promoted && !byId.has(promoted.post_id)) {
       byId.set(promoted.post_id, mapPostRow(promoted));
     }
@@ -258,11 +440,14 @@ router.get('/', ensureAuth, async (req, res) => {
     for (const m of mediaRows) {
       if (m.source_type === 'image') byId.get(m.post_id)?.images.push(m.source_url);
     }
-    for (const p of photoRows) byId.get(p.post_id)?.images.push(p.source);
+    for (const ph of photoRows) byId.get(ph.post_id)?.images.push(ph.source);
     for (const v of videoRows) byId.get(v.post_id)?.videos.push(v.source);
+
+    // existing likes list (kept for backward compatibility)
     for (const l of likeRows) {
       byId.get(l.post_id)?.likes.push({ userId: String(l.user_id), username: l.user_name });
     }
+
     for (const c of commentRows) {
       const post = byId.get(c.post_id);
       if (post) {
@@ -277,13 +462,51 @@ router.get('/', ensureAuth, async (req, res) => {
       }
     }
 
+    // ---- reactions aggregation + my reaction ----
+    const rxAggMap = new Map();
+    for (const r of reactAggRows) {
+      const arr = rxAggMap.get(r.post_id) || [];
+      arr.push({ reaction: r.reaction, c: Number(r.c || 0) });
+      rxAggMap.set(r.post_id, arr);
+    }
+    const myRxMap = new Map();
+    for (const r of myReactRows) {
+      myRxMap.set(r.post_id, r.reaction);
+    }
+
+    // ---- NEW: views totals + did current user view ----
+    const viewsById = new Map();
+    for (const v of viewAggRows) {
+      viewsById.set(Number(v.post_id), Number(v.views || 0));
+    }
+    const viewedSet = new Set(viewMineRows.map(v => Number(v.post_id)));
+
+
+    for (const postId of postIds) {
+      const post = byId.get(postId);
+      if (!post) continue;
+
+      // reactions
+      post.reactions  = rxAggMap.get(postId) || [];
+      post.myReaction = myRxMap.get(postId) || null;
+
+      // Backward-compat counters
+      const summed = post.reactions.reduce((sum, r) => sum + Number(r.c || 0), 0);
+      post.likesCount = summed > 0 ? summed : (Array.isArray(post.likes) ? post.likes.length : 0);
+      post.hasLiked   = Boolean(post.myReaction) ||
+                        (Array.isArray(post.likes) && post.likes.some(l => Number(l.userId) === userId));
+
+      // NEW: views
+      post.views     = viewsById.get(postId) || 0;                 // total views
+      post.hasViewed = viewedSet.has(Number(postId));              // current user viewed?
+    }
+
     // Output
     if (withPromoted) {
       const promotedOut = promoted ? byId.get(promoted.post_id) : null;
       const itemsOut = rows.map(p => byId.get(p.post_id)); // keep ranking order
       return res.json({ promoted: promotedOut, items: itemsOut });
     } else {
-      // backward compatible: return plain array (just the main list)
       return res.json(rows.map(p => byId.get(p.post_id)));
     }
   } catch (err) {
@@ -292,6 +515,20 @@ router.get('/', ensureAuth, async (req, res) => {
   }
 });
 
+router.get("/getreactions", ensureAuth, async (_req, res) => {
+  try {
+    const [rows] = await pool.promise().query(
+      `SELECT reaction, title, color, image
+         FROM system_reactions
+        WHERE enabled = '1'
+        ORDER BY reaction_order ASC`
+    );
+    res.json({ data: rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Failed to load reactions" });
+  }
+});
 
 // GET /api/posts/:id (detail)
 router.get('/:id',
@@ -625,26 +862,28 @@ router.post('/:id/react',
     try {
       await conn.beginTransaction();
 
-      const [rows] = await conn.query(
-        `SELECT id FROM posts_reactions WHERE post_id=? AND user_id=? AND reaction=?`,
-        [id, userId, reaction]
-      );
-      if (rows.length) {
-        // remove like
-        await conn.query(`DELETE FROM posts_reactions WHERE id=?`, [rows[0].id]);
+        // add like
+        const [rx] = await conn.query(
+          `SELECT reaction FROM system_reactions WHERE reaction = ? AND enabled = '1' LIMIT 1`,
+          [reaction]
+        );
+        if (!rx[0]) return res.status(400).json({ error: "Unknown reaction" });
+    
         await conn.query(
-          `UPDATE posts SET reaction_like_count = GREATEST(reaction_like_count - 1, 0) WHERE post_id=?`,
+          `INSERT INTO posts_reactions (post_id, user_id, reaction, reaction_time, points_earned)
+           VALUES (?, ?, ?, NOW(), '1')
+           ON DUPLICATE KEY UPDATE reaction = VALUES(reaction), reaction_time = NOW()`,
+          [id, userId, reaction]
+        );
+    
+        const [counts] = await conn.query(
+          `SELECT reaction, COUNT(*) AS c
+             FROM posts_reactions
+            WHERE post_id = ?
+            GROUP BY reaction`,
           [id]
         );
-        await conn.commit();
-        return res.json({ liked: false });
-      } else {
-        // add like
-        await conn.query(
-          `INSERT INTO posts_reactions (post_id, user_id, reaction, reaction_time)
-           VALUES (?, ?, 'like', NOW())`,
-          [id, userId]
-        );
+
         await conn.query(
           `UPDATE posts SET reaction_like_count = reaction_like_count + 1 WHERE post_id=?`,
           [id]
@@ -656,7 +895,7 @@ router.post('/:id/react',
         );
         if (!post) return res.status(404).json({ error: 'Post not found' });
         const authorId = Number(post.authorId);
-        console.log(post,'postpost')
+
         if (authorId && authorId !== userId) {
           const payload = {
             recipientId: authorId,
@@ -682,7 +921,7 @@ router.post('/:id/react',
             req,                        // so it can read req.system
             checkActivePackage,         // your existing fn
             });
-            console.log(out1,'out1out1out1out1')
+            // console.log(out1,'out1out1out1out1')
           
  
        // Earning points section for post create
@@ -690,7 +929,7 @@ router.post('/:id/react',
 
         await conn.commit();
         return res.json({ liked: true });
-      }
+      
     } catch (err) {
       await conn.rollback();
       console.error('[POST /posts/:id/react] ', err);
@@ -700,6 +939,35 @@ router.post('/:id/react',
     }
   }
 );
+
+router.delete("/:id/react", ensureAuth, async (req, res) => {
+  const postId = Number(req.params.id);
+  const userId = Number(req.user.userId);
+  if (!postId) return res.status(400).json({ error: "Missing postId" });
+  const conn = await pool.promise().getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query(
+      `DELETE FROM posts_reactions WHERE post_id = ? AND user_id = ?`,
+      [postId, userId]
+    );
+
+    const [counts] = await conn.query(
+      `SELECT reaction, COUNT(*) AS c
+         FROM posts_reactions
+        WHERE post_id = ?
+        GROUP BY reaction`,
+      [postId]
+    );
+    await conn.commit();
+    res.json({ ok: true, myReaction: null, counts });
+  } catch (e) {
+    console.error(e);
+    await conn.commit();
+    res.status(500).json({ error: "Failed to unreact" });
+  }
+});
+
 
 // POST /api/posts/:id/comment
 router.post('/:id/comment',
@@ -951,5 +1219,7 @@ router.delete('/:id/boost', ensureAuth, async (req, res) => {
     conn.release();
   }
 });
+
+
 
 module.exports = router;
