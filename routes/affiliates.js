@@ -21,7 +21,7 @@ async function loadOptions(prefix = 'affiliates_') {
 // Optional: base URL used to craft the share link
 function siteBase(req) {
   // prefer configured public URL, fallback to request host
-  const env = process.env.PUBLIC_SITE_URL || process.env.SITE_URL || '';
+  const env = process.env.CLIENT_ORIGIN || process.env.SITE_URL || '';
   if (env) return env.replace(/\/+$/, '');
   const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
   const host  = req.headers['x-forwarded-host']  || req.headers.host;
