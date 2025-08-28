@@ -3,12 +3,14 @@ const express = require("express");
 const axios = require("axios");
 const router = express.Router();
 const { PAYSTACK_SECRET_KEY, PAYSTACK_BASE_URL } = process.env;
-const { pool } = require('../config/db');
+const pool  = require('../config/db');
 const crypto = require('crypto');
 const { ensureAuth } = require('../middlewares/auth');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+
+function i(v, d) { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : d; }
 
 
 
@@ -64,6 +66,7 @@ const upload = multer({
 // POST /api/payments/initialize
 // body: { email, amount, metadata?: { userId, orderId, ... } }
 router.post("/initialize", async (req, res, next) => {
+  console.log(req.system.paystack_secret);
   const { email, amount, metadata } = req.body;
   try {
     const response = await axios.post(
@@ -76,7 +79,7 @@ router.post("/initialize", async (req, res, next) => {
       },
       {
         headers: {
-          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+          Authorization: `Bearer ${req.system.paystack_secret}`,
           "Content-Type": "application/json",
         },
       }
@@ -98,7 +101,7 @@ function verifySignature(req) {
     : Buffer.from(JSON.stringify(req.body || {}));
 
   const computedHex = crypto
-    .createHmac('sha512', PAYSTACK_SECRET_KEY)
+    .createHmac('sha512', req.system.paystack_secret)
     .update(bodyBuf)
     .digest('hex');
 
@@ -126,7 +129,7 @@ router.post('/webhook', async (req, res, next) => {
       let amount = data.amount;
       let reference = data.reference;
       let user_email = data.customer.email;
-      const [rows1] = await pool.promise().query(
+      const [rows1] = await pool.query(
         `SELECT 
            transaction_id
          FROM wallet_transactions
@@ -135,7 +138,7 @@ router.post('/webhook', async (req, res, next) => {
       );
       if(rows1.length==0)
       {
-          const [rows] = await pool.promise().query(
+          const [rows] = await pool.query(
           `SELECT 
           user_id
           FROM users
@@ -156,15 +159,15 @@ router.post('/webhook', async (req, res, next) => {
           if (values.some(v => v === undefined)) {
             throw new Error(`Missing value in: ${JSON.stringify(values)}`);
           }
-          const [result] = await pool.promise().execute(sql, values);
-          const [r1] = await pool.promise().execute(
+          const [result] = await pool.execute(sql, values);
+          const [r1] = await pool.execute(
           `INSERT INTO log_payments
           (user_id, method, handle, amount,  time)
           VALUES (?, ?,?, ?,NOW())`,
           [user_id,'paystack','wallet',amount,]
           );
 
-          const update = await pool.promise().query(
+          const update = await pool.query(
           'UPDATE users SET user_wallet_balance = user_wallet_balance+? WHERE user_id = ?',
           [amount, user_id]
           );
@@ -190,45 +193,52 @@ router.get(
       next(err);
     }
   });
-router.get(
-  '/transactions',
-  ensureAuth,
-  async (req, res, next) => {
+  router.get("/transactions", ensureAuth, async (req, res) => {
+    const userId = Number(req.user.userId);
+    const page = i(req.query.page, 1);
+    const pageSize = i(req.query.pageSize, 20);
+    const startDate = req.query.startDate || null; // YYYY-MM-DD
+    const endDate = req.query.endDate || null;     // YYYY-MM-DD
+  
+    const where = ["user_id = ?"];
+    const params = [userId];
+  
+    if (startDate) { where.push("created_at >= ?"); params.push(`${startDate} 00:00:00`); }
+    if (endDate)   { where.push("created_at <= ?"); params.push(`${endDate} 23:59:59`); }
+  
+    const whereSql = `WHERE ${where.join(" AND ")}`;
+  
     try {
-      const userId = req.user.userId;
-      const { start, end } = req.query;
-
-      const whereClauses = ['user_id = ?'];
-      const params = [userId];
-
-      if (start) {
-        whereClauses.push('created_at >= ?');
-        params.push(start + ' 00:00:00');
-      }
-      if (end) {
-        whereClauses.push('created_at <= ?');
-        params.push(end + ' 23:59:59');
-      }
-
-      const sql = `
-        SELECT
-          transaction_id AS id,
-          amount,
-          node_type AS type,        -- e.g. 'replenish' | 'affiliate' | 'payment'
-          date AS createdAt
-        FROM wallet_transactions
-        WHERE ${whereClauses.join(' AND ')}
-        ORDER BY date DESC
-        LIMIT 100
-      `;
-
-      const [rows] = await pool.promise().query(sql, params);
-      res.json(rows);
-    } catch (err) {
-      next(err);
+      const [cRows] = await pool.query(`SELECT COUNT(*) AS cnt FROM wallet_transactions ${whereSql}`, params);
+      const total = Number(cRows[0]?.cnt || 0);
+      const offset = (page - 1) * pageSize;
+  
+      const [rows] = await pool.query(
+        `SELECT transaction_id AS id, type, amount, date AS createdAt
+           FROM wallet_transactions
+         ${whereSql}
+         ORDER BY transaction_id DESC
+         LIMIT ? OFFSET ?`,
+        [...params, pageSize, offset]
+      );
+  
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      res.json({
+        data: rows,
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasMore: page < totalPages,
+        nextPage: page < totalPages ? page + 1 : null,
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to fetch transactions" });
     }
-  }
-);
+  });
+  
+
 
 router.post(
   '/bank-transfer/receipt',
@@ -265,7 +275,7 @@ router.post(
         VALUES (?, 'wallet', ?, ?, NOW(), 0)
       `;
 
-      const [result] = await pool.promise().query(sql, [
+      const [result] = await pool.query(sql, [
         userId,
         amount,
         relFromUploads, // store "photos/YYYY/MM/..."

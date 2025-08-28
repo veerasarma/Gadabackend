@@ -57,6 +57,12 @@ async function handleSingleView({ req, postId, viewerId }) {
        VALUES (?, ?, NOW())`,
       [postId, viewerId]
     );
+   
+    const [ins1] = await conn.query(
+      `INSERT INTO posts_views (post_id, user_id, view_date)
+       VALUES (?, ?, NOW())`,
+      [postId, viewerId]
+    );
     const viewEventId = ins.insertId;
 
     await conn.commit();

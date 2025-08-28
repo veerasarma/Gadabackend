@@ -79,8 +79,14 @@ function requireRole(allowed) {
   };
 }
 
+function requireAdmin(req, res, next) {
+  const role = String(req.user?.roles || 'user').toLowerCase();
+  if (role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  next();
+}
 
-module.exports = { ensureAuth, requireRole };
+
+module.exports = { ensureAuth, requireRole,requireAdmin };
 
 
 // module.exports = { ensureAuth };

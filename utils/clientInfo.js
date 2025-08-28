@@ -14,7 +14,7 @@ function parseUserAgent(userAgent) {
     userAgent: userAgent || '',
     browserName: r.browser.name || null,
     browserVersion: r.browser.version || null,
-    osName: r.os.name || null,
+    osName: r.os.name || '',
     osVersion: r.os.version || null,
     deviceType: r.device.type || 'desktop', // ua-parser returns undefined on desktops
   };
