@@ -22,34 +22,34 @@ const savesRoutes = require("./routes/saves");
 const memoriesRouter = require("./routes/memories");
 const payments = require("./routes/payments");
 const packagesRoutes = require("./routes/packages");
-const notificationRoutes = require('./routes/notifications');
-const settingsRoutes = require('./routes/settings');
-const adminRoutes = require('./routes/admin');
-const adminSettingsRoutes = require('./routes/adminSettings');
-const adminProfileRoutes = require('./routes/adminProfile');
-const adminPostsRoutes = require('./routes/adminPosts');
-const adminCommentsRoutes = require('./routes/adminComments');
-const { initSystemConfig } = require('./config/systemLoader');
-const initSystem = require('./middlewares/attachSystem');
-const { initSocket } = require('./socket');
-const pointsRoutes =  require('./routes/points');
-const representativesRoutes = require('./routes/representatives');
-const postViewsRoutes = require('./routes/postViews');
-const proRoutes = require('./routes/pro');
-const profileRoutes = require('./routes/profile');
-const searchRoutes = require('./routes/search');
-const hashtagRoutes = require('./routes/hashtag');
-const messengerRoutes = require('./routes/messenger');
+const notificationRoutes = require("./routes/notifications");
+const settingsRoutes = require("./routes/settings");
+const adminRoutes = require("./routes/admin");
+const adminSettingsRoutes = require("./routes/adminSettings");
+const adminProfileRoutes = require("./routes/adminProfile");
+const adminPostsRoutes = require("./routes/adminPosts");
+const adminCommentsRoutes = require("./routes/adminComments");
+const { initSystemConfig } = require("./config/systemLoader");
+const initSystem = require("./middlewares/attachSystem");
+const { initSocket } = require("./socket");
+const pointsRoutes = require("./routes/points");
+const representativesRoutes = require("./routes/representatives");
+const postViewsRoutes = require("./routes/postViews");
+const proRoutes = require("./routes/pro");
+const profileRoutes = require("./routes/profile");
+const searchRoutes = require("./routes/search");
+const hashtagRoutes = require("./routes/hashtag");
+const messengerRoutes = require("./routes/messenger");
 const adminRepresentativesRoutes = require("./routes/adminRepresentatives");
 const adminBankTransfersRoutes = require("./routes/adminBankTransfers");
+const adminEarningPayments = require("./routes/adminEarningPayments");
 const adminpagecategoriesRoutes = require("./routes/admin/pageCategories");
 const adminGroupsRoutes = require("./routes/admin/adminGroups");
 const adminPagesRoutes = require("./routes/adminPages");
-const pagesRoutes = require('./routes/pages');
-const eventsRoutes = require('./routes/events');
-const watchRoutes = require('./routes/watch');
-const walletRoutes = require('./routes/walletWithdrawals');
-
+const pagesRoutes = require("./routes/pages");
+const eventsRoutes = require("./routes/events");
+const watchRoutes = require("./routes/watch");
+const walletRoutes = require("./routes/walletWithdrawals");
 
 const app = express();
 
@@ -136,20 +136,21 @@ app.use("/api/admin/posts", adminPostsRoutes);
 app.use("/api/admin/comments", adminCommentsRoutes);
 app.use("/api/admin/representatives", adminRepresentativesRoutes);
 app.use("/api/admin/pages", adminPagesRoutes);
-app.use('/api/representatives', representativesRoutes);
-app.use('/api/postsviews', postViewsRoutes);
-app.use('/api/search', searchRoutes);
-app.use('/api/pro', proRoutes);
-app.use('/api/profile', profileRoutes);
-app.use('/api/hashtag', hashtagRoutes);
-app.use('/api/messenger', messengerRoutes);
-app.use('/api/pages', pagesRoutes);
-app.use('/api/events', eventsRoutes);
-app.use('/api/watch', watchRoutes);
-app.use('/api/wallet/withdrawals', walletRoutes);
-app.use('/api', initRoute);
-app.use('/api', authRoutes);
+app.use("/api/representatives", representativesRoutes);
+app.use("/api/postsviews", postViewsRoutes);
+app.use("/api/search", searchRoutes);
+app.use("/api/pro", proRoutes);
+app.use("/api/profile", profileRoutes);
+app.use("/api/hashtag", hashtagRoutes);
+app.use("/api/messenger", messengerRoutes);
+app.use("/api/pages", pagesRoutes);
+app.use("/api/events", eventsRoutes);
+app.use("/api/watch", watchRoutes);
+app.use("/api/wallet/withdrawals", walletRoutes);
+app.use("/api", initRoute);
+app.use("/api", authRoutes);
 app.use("/api/admin/bank-transfers", adminBankTransfersRoutes);
+app.use("/api/admin/earning-payments", adminEarningPayments);
 app.use("/api/admin/page-categories", adminpagecategoriesRoutes);
 app.use("/api/admin/groups", adminGroupsRoutes);
 app.use('/api/affiliates', require('./routes/affiliates'));
@@ -161,9 +162,10 @@ app.use("/api/admin/wallet-settings", require("./routes/admin/adminWalletSetting
 app.use("/api/admin/earnings/packages", require("./routes/admin/adminPackagesEarnings"));
 app.use("/api/admin/packages", require("./routes/admin/adminPackages"));
 app.use("/api/admin/subscribers", require("./routes/admin/adminSubscribers"));
-app.use("/api/admin/settings/points", require("./routes/admin/adminPointsSettings"));
-
-
+app.use(
+  "/api/admin/settings/points",
+  require("./routes/admin/adminPointsSettings")
+);
 
 app.get("/", (_req, res) => res.send("API is running"));
 
