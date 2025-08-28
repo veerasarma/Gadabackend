@@ -12,6 +12,7 @@ async function createNotification({
   message = null,
   meta = null,          // object (will be JSON.stringified)            // optional socket.io server (to push live)
 }) {
+  // console.log(recipientUserId,actorUserId,recipientUserId,actorUserId)
   if (!recipientUserId || !actorUserId || recipientUserId === actorUserId) return null;
 
   const [r] = await pool.query(
@@ -32,7 +33,7 @@ async function createNotification({
         n.notification_id,
         n.node_type AS entityType,
         n.notify_id   AS entityId,
-        n.message,
+        n.action,
         n.seen     AS seen,
         n.time  AS createdAt,
         a.user_id     AS actorId,

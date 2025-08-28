@@ -7,6 +7,7 @@ const pool = require('../config/db');
 const { ensureAuth } = require('../middlewares/auth');
 const { getIO } = require('../socket');
 const router = express.Router();
+const { createNotification } = require('../services/notificationService');
 
 /* ---------- uploads (images / voice) ---------- */
 function ensureDirSync(dir) {
@@ -279,7 +280,13 @@ router.post(
         `SELECT 1 FROM conversations_users WHERE conversation_id=? AND user_id=? LIMIT 1`,
         [conversationId, me]
       );
-      if (!member) {
+
+      const [[member1]] = await conn.query(
+        `SELECT user_id FROM conversations_users WHERE conversation_id=? AND user_id!=? LIMIT 1`,
+        [conversationId,me]
+      );
+
+      if (!member || !member1) {
         await conn.rollback();
         return res.status(403).json({ error: 'Forbidden' });
       }
@@ -315,6 +322,25 @@ router.post(
         voice: voicePath || null,
         time: new Date().toISOString(),
       };
+
+      const payload = {
+        recipientId: member1.user_id,
+        userId:me,
+        type: 'new_message',
+        entityType: 'message',
+        entityId: messageId,
+        meta: { messageId },
+      };
+
+     
+      if (createNotification) {
+        // console.log("notification section")
+        // Use your service (emits socket + returns enriched row)
+        createNotification(payload).catch(err =>
+          console.error('[notif] post_like helper failed', err)
+        );
+      } 
+
 
       // realtime: deliver to peers + bump their left list
       const preview =

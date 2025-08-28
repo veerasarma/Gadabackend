@@ -99,7 +99,7 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
 // Rate limiter (after static so assets aren't rate-limited)
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
 app.use(limiter);
 
 // System init
@@ -152,6 +152,7 @@ app.use('/api', authRoutes);
 app.use("/api/admin/bank-transfers", adminBankTransfersRoutes);
 app.use("/api/admin/page-categories", adminpagecategoriesRoutes);
 app.use("/api/admin/groups", adminGroupsRoutes);
+app.use('/api/affiliates', require('./routes/affiliates'));
 app.use('/api/admin/group-categories', require('./routes/admin/groupCategories'));
 app.use('/api/admin/events', require('./routes/admin/adminEvents'));
 app.use('/api/admin/events-categories',require('./routes/admin/adminEventCategories'));

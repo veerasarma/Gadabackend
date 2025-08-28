@@ -530,6 +530,135 @@ router.get("/getreactions", ensureAuth, async (_req, res) => {
   }
 });
 
+router.post(
+  "/edit/:id",
+  ensureAuth,
+  body("text").optional().isString().trim().isLength({ min: 1, max: 5000 }),
+  body("privacy").optional().isIn(["public", "friends", "only_me"]),
+  body("images").optional().isArray({ max: 10 }),
+  body("images.*").optional().isString().trim(),
+  body("videos").optional().isArray({ max: 5 }),
+  body("videos.*").optional().isString().trim(),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const postId = Number(req.params.id);
+    const userId = Number(req.user.userId || 0);
+    const { text, privacy, images, videos } = req.body;
+
+    if (!text && !privacy && !images && !videos) {
+      return res.status(400).json({ error: "Nothing to update" });
+    }
+
+    const conn = await pool.promise().getConnection();
+    try {
+      await conn.beginTransaction();
+
+      // 1) Authorize (locking row while we edit)
+      const [rows] = await conn.query(
+        "SELECT user_id FROM posts WHERE post_id = ? FOR UPDATE",
+        [postId]
+      );
+      const row = rows[0];
+      if (!row) {
+        await conn.rollback();
+        return res.status(404).json({ error: "Post not found" });
+      }
+      if (Number(row.user_id) !== userId) {
+        await conn.rollback();
+        return res.status(403).json({ error: "You can only edit your own post" });
+      }
+
+      // 2) Update base fields
+      const setParts = [];
+      const setVals = [];
+      if (typeof text === "string") {
+        setParts.push("text = ?");
+        setVals.push(text.trim());
+      }
+      if (typeof privacy === "string") {
+        setParts.push("privacy = ?");
+        setVals.push(privacy);
+      }
+      if (setParts.length) {
+        // Track edit state if you keep such columns (safe if missing)
+        // setParts.push("edited = 1", "edited_at = NOW()");
+        await conn.query(
+          `UPDATE posts SET ${setParts.join(", ")} WHERE post_id = ?`,
+          [...setVals, postId]
+        );
+      }
+
+      // 3) Optional: replace media (ONLY if arrays provided)
+      if (Array.isArray(images)) {
+        await conn.query("DELETE FROM posts_media WHERE post_id = ? AND source_type = 'image'", [postId]);
+        if (images.length) {
+          const values = images.map((src) => [postId, src, "image"]);
+          await conn.query(
+            "INSERT INTO posts_media (post_id, source_url, source_type) VALUES ?",
+            [values]
+          );
+        }
+      }
+      if (Array.isArray(videos)) {
+        await conn.query("DELETE FROM posts_videos WHERE post_id = ?", [postId]);
+        if (videos.length) {
+          const vvalues = videos.map((src) => [postId, src]);
+          await conn.query(
+            "INSERT INTO posts_videos (post_id, source) VALUES ?",
+            [vvalues]
+          );
+        }
+      }
+
+      await conn.commit();
+
+      // 4) Return updated post (minimal shape used by your feed)
+      const [[updated]] = await Promise.all([
+        conn.query(
+          `SELECT
+             p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+             p.reaction_like_count, p.comments,
+             IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+             u.user_picture AS authorProfileImage
+           FROM posts p
+           JOIN users u ON u.user_id = p.user_id
+          WHERE p.post_id = ?`,
+          [postId]
+        ),
+      ]);
+
+      // Attach media (optional, small follow-ups)
+      const [media]  = await conn.query(
+        "SELECT source_url, source_type FROM posts_media WHERE post_id = ? AND source_type = 'image'",
+        [postId]
+      );
+      const [videosR] = await conn.query(
+        "SELECT source FROM posts_videos WHERE post_id = ?",
+        [postId]
+      );
+
+      const out = {
+        ...updated[0],
+        images: (media || []).filter(m => m.source_type === "image").map(m => m.source_url),
+        videos: (videosR || []).map(v => v.source),
+      };
+
+      return res.json({ ok: true, post: out });
+    } catch (e) {
+      try { await conn.rollback(); } catch {}
+      console.error("[PATCH /posts/:id]", e);
+      return res.status(500).json({ error: "Failed to update post" });
+    } finally {
+      conn.release();
+    }
+  }
+);
+
+
 // GET /api/posts/:id (detail)
 router.get('/:id',
   ensureAuth,
@@ -851,10 +980,15 @@ router.post('/:id/react',
   param('id').isInt().toInt(),
   body('reaction').optional().isIn(['like']).default('like'),
   async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    // console.log(req.body.reaction,'req.body.reaction')
+    // const errors = validationResult(req);
+    // if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { id } = req.params;
+    if (!id || !req.body.reaction) {
+      return res.status(400).json({ error: "Missing postId or reaction" });
+    }
+
     const userId = req.user.userId;
     const reaction = req.body.reaction || 'like';
 
@@ -895,7 +1029,7 @@ router.post('/:id/react',
         );
         if (!post) return res.status(404).json({ error: 'Post not found' });
         const authorId = Number(post.authorId);
-
+        console.log(authorId,'authorId',userId)
         if (authorId && authorId !== userId) {
           const payload = {
             recipientId: authorId,
@@ -906,7 +1040,9 @@ router.post('/:id/react',
             meta: { id },
           };
     
+          console.log("notification section1111")
           if (createNotification) {
+            console.log("notification section")
             // Use your service (emits socket + returns enriched row)
             createNotification(payload).catch(err =>
               console.error('[notif] post_like helper failed', err)
@@ -1219,6 +1355,7 @@ router.delete('/:id/boost', ensureAuth, async (req, res) => {
     conn.release();
   }
 });
+
 
 
 
