@@ -2,6 +2,8 @@
 const express = require('express');
 const pool = require('../config/db'); // mysql2 pool (promise)
 const { ensureAuth } = require('../middlewares/auth'); 
+const { body, validationResult } = require("express-validator");
+
 // ^ implement as a thin wrapper that populates req.user if logged in, but never blocks
 
 const router = express.Router();
@@ -382,5 +384,121 @@ router.get('/:userId/friends', ensureAuth, async (req, res) => {
     conn.release();
   }
 });
+
+router.get("/me", ensureAuth, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    const [rows] = await pool
+      
+      .query(
+        `SELECT
+           user_firstname   AS firstName,
+           user_lastname    AS lastName,
+           user_gender      AS gender,
+           DATE_FORMAT(user_birthdate, '%Y-%m-%d') AS birthdate,
+           user_biography   AS bio,
+           user_website     AS website,
+           user_work_title  AS workTitle,
+           user_work_place  AS workPlace,
+           user_current_city AS currentCity,
+           user_hometown    AS hometown,
+           user_social_facebook  AS socialFacebook,
+           user_social_twitter   AS socialTwitter,
+           user_social_instagram AS socialInstagram,
+           user_social_youtube   AS socialYoutube,
+           user_social_linkedin  AS socialLinkedin,
+           user_privacy_chat   AS privacyChat,
+           user_privacy_wall   AS privacyWall,
+           user_privacy_photos AS privacyPhotos
+         FROM users
+         WHERE user_id = ?
+         LIMIT 1`,
+        [userId]
+      );
+    res.json(rows[0] || {});
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Failed to load profile" });
+  }
+});
+
+// PUT /api/profile  -> apply edits (allow-list)
+router.put(
+  "/",
+  ensureAuth,
+  body("firstName").optional().isLength({ max: 256 }),
+  body("lastName").optional().isLength({ max: 256 }),
+  body("gender").optional().isLength({ max: 50 }),
+  body("birthdate").optional().isISO8601().toDate(),
+  body("bio").optional().isLength({ max: 1000 }),
+  body("website").optional().isLength({ max: 256 }),
+  body("workTitle").optional().isLength({ max: 256 }),
+  body("workPlace").optional().isLength({ max: 256 }),
+  body("currentCity").optional().isLength({ max: 256 }),
+  body("hometown").optional().isLength({ max: 256 }),
+  body("socialFacebook").optional().isLength({ max: 256 }),
+  body("socialTwitter").optional().isLength({ max: 256 }),
+  body("socialInstagram").optional().isLength({ max: 256 }),
+  body("socialYoutube").optional().isLength({ max: 256 }),
+  body("socialLinkedin").optional().isLength({ max: 256 }),
+  body("privacyChat").optional().isIn(["me", "friends", "public"]),
+  body("privacyWall").optional().isIn(["me", "friends", "public"]),
+  body("privacyPhotos").optional().isIn(["me", "friends", "public"]),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+      return res.status(400).json({ errors: errors.array() });
+
+    const userId = Number(req.user.userId);
+    const p = req.body || {};
+
+    // map payload -> columns (allow list)
+    const updates = {
+      user_firstname: p.firstName,
+      user_lastname: p.lastName,
+      user_gender: p.gender,
+      user_birthdate: p.birthdate || null,
+      user_biography: p.bio,
+      user_website: p.website,
+      user_work_title: p.workTitle,
+      user_work_place: p.workPlace,
+      user_current_city: p.currentCity,
+      user_hometown: p.hometown,
+      user_social_facebook: p.socialFacebook,
+      user_social_twitter: p.socialTwitter,
+      user_social_instagram: p.socialInstagram,
+      user_social_youtube: p.socialYoutube,
+      user_social_linkedin: p.socialLinkedin,
+      user_privacy_chat: p.privacyChat,
+      user_privacy_wall: p.privacyWall,
+      user_privacy_photos: p.privacyPhotos,
+    };
+
+    // prune undefined fields so we only update what was sent
+    const fields = [];
+    const values = [];
+    Object.entries(updates).forEach(([col, val]) => {
+      if (typeof val !== "undefined") {
+        fields.push(`${col} = ?`);
+        values.push(val);
+      }
+    });
+
+    if (!fields.length) return res.json({ ok: true });
+
+    try {
+      await pool
+        
+        .query(
+          `UPDATE users SET ${fields.join(", ")} WHERE user_id = ? LIMIT 1`,
+          [...values, userId]
+        );
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Failed to update profile" });
+    }
+  }
+);
 
 module.exports = router;
