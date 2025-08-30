@@ -758,6 +758,7 @@ exports.signIn = async (req, res, next) => {
 
       const pkg = await checkActivePackage(user.user_id).catch(() => ({ active: false }));
       user.packageactive = pkg.active;
+      user.packageName = pkg.packageName;
 
     const token = jwt.sign(payload, process.env.JWT_SECRET, {
       expiresIn: remember ? "30d" : "1d",

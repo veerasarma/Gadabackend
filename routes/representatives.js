@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const pool = require('../config/db');                // mysql2/promise pool
 const { ensureAuth } = require('../middlewares/auth'); // must set req.user.userId
+const { checkActivePackage } = require("../services/packageService");
 
 const router = express.Router();
 
@@ -101,6 +102,12 @@ router.post('/', ensureAuth, validators, async (req, res) => {
   } = req.body;
 
   try {
+
+    const pkg = await checkActivePackage(userId).catch(() => ({ active: false }));
+    if(pkg.active==false || pkg.packageName!='GADA VVIP')
+    {
+      return res.status(409).json({ error: 'This account is not eligible for a Representative. Only GADA VVIP users are eligible.' });
+    }
     // deny if already exists
     const [exists] = await pool.query(
       `SELECT id FROM representatives WHERE user_id = ? LIMIT 1`,
