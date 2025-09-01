@@ -310,9 +310,7 @@ router.get('/', ensureAuth, async (req, res) => {
       JOIN users u ON u.user_id = p.user_id
       WHERE p.is_hidden = '0'
         AND p.boosted = '1'
-        AND p.boosted_at IS NOT NULL
-        AND p.boosted_at >= (NOW() - INTERVAL 48 HOUR)
-      ORDER BY p.boosted_at DESC
+      ORDER BY p.post_id DESC
       LIMIT 50
     `);
 
