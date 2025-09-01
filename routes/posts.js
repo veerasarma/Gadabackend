@@ -344,7 +344,7 @@ router.get('/', ensureAuth, async (req, res) => {
           p.boosted = '1' AND p.boosted_at IS NOT NULL
           AND p.boosted_at >= (NOW() - INTERVAL 48 HOUR)
         )
-      ORDER BY score DESC
+      ORDER BY post_id DESC
       LIMIT 100
     `);
 
