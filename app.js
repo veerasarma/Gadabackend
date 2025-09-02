@@ -147,6 +147,7 @@ app.use("/api/pages", pagesRoutes);
 app.use("/api/events", eventsRoutes);
 app.use("/api/watch", watchRoutes);
 app.use("/api/wallet/withdrawals", walletRoutes);
+app.use("/api/reports", require("./routes/reports"));
 app.use("/api", initRoute);
 app.use("/api", authRoutes);
 app.use("/api/admin/bank-transfers", adminBankTransfersRoutes);
@@ -162,10 +163,14 @@ app.use("/api/admin/wallet-settings", require("./routes/admin/adminWalletSetting
 app.use("/api/admin/earnings/packages", require("./routes/admin/adminPackagesEarnings"));
 app.use("/api/admin/packages", require("./routes/admin/adminPackages"));
 app.use("/api/admin/subscribers", require("./routes/admin/adminSubscribers"));
+app.use("/api/admin/users", require("./routes/admin/users"));
+app.use("/api/admin/reports", require("./routes/admin/adminReports"));
+app.use('/api/admin/report-categories', require('./routes/admin/adminReportCategories'));
 app.use(
   "/api/admin/settings/points",
   require("./routes/admin/adminPointsSettings")
 );
+
 
 app.get("/", (_req, res) => res.send("API is running"));
 

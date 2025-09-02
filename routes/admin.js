@@ -63,7 +63,7 @@ router.get(
           u.user_email              AS email,
           u.user_registered         AS createdAt,
           u.user_group               AS role,
-          u.user_banned       AS isSuspended
+          u.user_banned       AS user_banned
         FROM users u
         ${whereSql}
         ORDER BY ${sortMap[sort]} ${dir}

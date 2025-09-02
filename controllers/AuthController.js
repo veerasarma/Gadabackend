@@ -748,6 +748,10 @@ exports.signIn = async (req, res, next) => {
       {
         throw new ValidationException('Your account still not activated');
       }
+      if(user.user_banned == '1')
+      {
+          throw new ValidationException('Your account has been suspended contact site Admin ');
+      }
   
       // JWT generation
       
@@ -757,6 +761,7 @@ exports.signIn = async (req, res, next) => {
       user.role = roles;
 
       const pkg = await checkActivePackage(user.user_id).catch(() => ({ active: false }));
+      console.log(pkg,'pkgpkg')
       user.packageactive = pkg.active;
       user.packageName = pkg.packageName;
 
