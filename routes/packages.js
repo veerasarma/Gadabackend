@@ -5,6 +5,7 @@ const db = require("../config/db");
 const authMiddleware = require("../");
 // const auth = require("../middlewares/authMiddleware");
 const { ensureAuth } = require("../middlewares/auth");
+const { awardAffiliateCommissions } = require('../utils/affiliatesHelper');
 
 router.get("/", ensureAuth, async (req, res) => {
   try {
@@ -247,6 +248,8 @@ router.post("/buypackage", ensureAuth, async (req, res) => {
     );
 
     await conn.commit();
+
+    const { awards } = await awardAffiliateCommissions(db, Number(user_id), Number(pkgPrice));
 
     return res.json({ status: true, message: "Package purchased successfully" });
   } catch (err) {

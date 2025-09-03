@@ -70,38 +70,18 @@ exports.activation = async (req, res, next) => {
   }
 };
 
+function normalizeRef(raw) {
+  if (!raw) return null;
+  const v = String(raw).trim();
+  if (!v) return null;
+  if (/^\d+$/.test(v)) return { by: 'id', value: Number(v) };
+  if (v.includes('@')) return { by: 'email', value: v };
+  return { by: 'username', value: v };
+}
+
+
 exports.signUp = async (req, res, next) => {
-  // const system = req.system;
-  // const date = getDateTime();
-  // const args = req.body;
-  // const device_info = args.device_info || {};
-  // const fromWeb = args.from_web ?? true;
-  // const email_verification_code = '123456'
-  // const subject = `Just one more step to get started on ${system.system_title}`;
-  // const mailheader = {
-  //   "List-Unsubscribe": `<mailto:unsubscribe@gada.chat>, <${system.system_url}/unsubscribe?email=${args.email}>`
-  // }
-  //     const name = system.show_usernames_enabled
-  //       ? args.username
-  //       : `${args.firstname} ${args.lastname}`;
-  //     //   console.log("before mail tesmpl")
-  //     //   const body = getEmailTemplate('activation_email', subject, { name, email_verification_code });
-  //     //   console.log("after mail tesmpl")
-  //     //   await sendEmail(args.email, subject, body.html, body.plain);
-  //     console.log(system.system_url, "system.system_url");
-  //     console.log(args.email, "args.email");
-
-  //     await sendEmail(args.email,mailheader, subject, "activation_email", {
-  //       name,
-  //       email_verification_code,
-  //       system: {
-  //         system_url: system.system_url,
-  //         system_title: system.system_title,
-  //       },
-  //     });
-  //     console.log("after send mail ");
-
-  //     return false;
+  
   try {
     const system = req.system;
     const date = getDateTime();
@@ -113,7 +93,11 @@ exports.signUp = async (req, res, next) => {
       throw new AuthorizationError("Registration is closed right now");
     }
 
-    console.log(args);
+    const { firstname, lastname, username, email, password, ref, referral } = req.body || {};
+    const refRaw = ref || referral || req.cookies?.ref || req.query?.ref || req.query?.r || null;
+    const refInfo = normalizeRef(refRaw);
+
+
     if (!validName(args.firstname, system))
       throw new ValidationException(
         "Your first name contains invalid characters"
@@ -147,52 +131,11 @@ exports.signUp = async (req, res, next) => {
     if (await getUserByEmail(args.email, system))
       throw new ValidationException(`${args.email} already exists`);
 
-    // if (system.activation_enabled && system.activation_type === 'sms') {
-    //   if (!args.phone) throw new ValidationException("Please enter a valid phone number");
-    //   if (await checkPhone(args.phone)) throw new ValidationException(`${args.phone} already exists`);
-    // } else {
-    //   args.phone = null;
-    // }
+ 
 
     checkPassword(args.password, system);
 
-    // args.gender = system.genders_disabled ? 1 : args.gender;
-    // if (!system.genders_disabled && !(await checkGender(args.gender))) {
-    //   throw new ValidationException("Please select a valid gender");
-    // }
-
-    // if (Number(system.age_restriction)) {
-    //   if (![...Array(13).keys()].includes(parseInt(args.birth_month))) throw new ValidationException("Please select a valid birth month (1-12)");
-    //   if (![...Array(32).keys()].includes(parseInt(args.birth_day))) throw new ValidationException("Please select a valid birth day (1-31)");
-    //   if (args.birth_year < 1905 || args.birth_year > 2017) throw new ValidationException("Please select a valid birth year (1905-2017)");
-    //   if (new Date().getFullYear() - args.birth_year < system.minimum_age) throw new ValidationException(`You must be ${system.minimum_age} years old to register`);
-    //   args.birth_date = `${args.birth_year}-${args.birth_month}-${args.birth_day}`;
-    // } else {
-    //   args.birth_date = null;
-    // }
-
-    // const custom_fields = await setCustomFields(args);
-
-    // if (Number(system.reCAPTCHA_enabled) && fromWeb && !(await validateRecaptcha(args['g-recaptcha-response'], getClientIP(req)))) {
-    //   throw new ValidationException("The security check is incorrect. Please try again");
-    // }
-
-    //   if (system.turnstile_enabled && fromWeb && !(await validateTurnstile(args['cf-turnstile-response']))) {
-    //     throw new ValidationException("The security check is incorrect. Please try again");
-    //   }
-
-    // let custom_user_group = '0';
-    // console.log(system.select_user_group_enabled,'system.select_user_group_enabled')
-    // if (Number(system.select_user_group_enabled)) {
-    //   if (!args.custom_user_group || args.custom_user_group === 'none') throw new ValidationException("Please select a valid user group");
-    //   custom_user_group = await checkUserGroup(args.custom_user_group) ? args.custom_user_group : '0';
-    // } else {
-    //   custom_user_group = await checkUserGroup(system.default_custom_user_group) ? system.default_custom_user_group : '0';
-    // }
-
-    // const newsletter_agree = args.newsletter_agree ? '1' : '0';
-
-    // if (!args.privacy_agree && fromWeb) throw new ValidationException("You must agree to the privacy policy");
+    
 
     const email_verification_code = getHashKey(6, true);
     const phone_verification_code =
@@ -220,14 +163,31 @@ exports.signUp = async (req, res, next) => {
     );
 
     const user_id = insertResult.insertId;
+    console.log(refInfo,'refInforefInforefInfo')
+    let referrerId = null;
+    if (refInfo) {
+      let rows;
+      if (refInfo.by === 'id') {
+        [rows] = await db.query('SELECT user_id FROM users WHERE user_id=? LIMIT 1', [refInfo.value]);
+      } else if (refInfo.by === 'email') {
+        [rows] = await db.query('SELECT user_id FROM users WHERE user_email=? LIMIT 1', [refInfo.value]);
+      } else {
+        [rows] = await db.query('SELECT user_id FROM users WHERE user_name=? LIMIT 1', [refInfo.value]);
+      }
+      if (rows.length) referrerId = Number(rows[0].user_id);
+    }
 
-    // await setDefaultPrivacy(user_id,system);
+    if (referrerId && referrerId !== user_id) {
+      await db.query('UPDATE users SET user_referrer_id=? WHERE user_id=?', [referrerId, user_id]);
+      await db.query(
+        `INSERT INTO users_affiliates (referrer_id, referee_id)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE referrer_id=VALUES(referrer_id)`,
+        [referrerId, user_id]
+      );
+    }
 
-    // if (custom_fields) {
-    //   for (const field_id in custom_fields) {
-    //     await db.query('INSERT INTO custom_fields_values (value, field_id, node_id, node_type) VALUES (?, ?, ?, ?)', [custom_fields[field_id], field_id, user_id, 'user']);
-    //   }
-    // }
+
 
     if (system.activation_enabled) {
       const subject = `Just one more step to get started on ${system.system_title}`;

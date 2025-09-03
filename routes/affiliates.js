@@ -62,7 +62,7 @@ router.get('/overview', ensureAuth, async (req, res) => {
     );
 
     // share link (like your screenshot)
-    const link = `${siteBase(req)}/?ref=${encodeURIComponent(me?.user_name || String(userId))}`;
+    const link = `${siteBase(req)}/register?ref=${encodeURIComponent(me?.user_name || String(userId))}`;
 
     // --- count referrals per level (users_affiliates is a flat mapping) ---
     // table: users_affiliates(id, referrer_id, referee_id) with unique index on pair
