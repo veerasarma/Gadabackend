@@ -97,37 +97,63 @@ function safeJSON(s) { try { return s ? JSON.parse(s) : null; } catch { return n
   // LIST stories (map DB → viewer-friendly shape)
   router.get('/', ensureAuth, async (req, res) => {
     try {
+      // If you want to limit to last 24h, uncomment the WHERE and add the param in query.
       const [rows] = await pool.query(
-        `SELECT s.story_id, s.user_id, s.time AS story_time,
-                m.media_id, m.source, m.is_photo, m.text,
-                m.overlays, m.music_url, m.music_volume, m.time AS media_time
-         FROM stories s
-         JOIN stories_media m ON m.story_id = s.story_id
-         ORDER BY s.time DESC, m.media_id ASC`
+        `
+        SELECT s.story_id,
+               s.user_id,
+               s.time              AS story_time,
+               u.user_name         AS username,
+               u.user_picture      AS avatar,
+               m.media_id,
+               m.source,
+               m.is_photo,
+               m.text,             -- caption
+               m.overlays,
+               m.music_url,
+               m.music_volume,
+               m.time              AS media_time
+          FROM stories s
+          JOIN stories_media m ON m.story_id = s.story_id
+          JOIN users        u  ON u.user_id  = s.user_id
+         -- WHERE m.time >= (NOW() - INTERVAL 24 HOUR)
+         ORDER BY s.time DESC, m.media_id ASC
+        `
       );
-
-      const byUser = new Map();
+  
+      const groups = new Map();
+  
       for (const r of rows) {
-        if (!byUser.has(r.user_id)) {
-          byUser.set(r.user_id, {
+        const userIdKey = String(r.user_id);
+  
+        // initialize group with username + avatar ONCE
+        if (!groups.has(userIdKey)) {
+          groups.set(userIdKey, {
             userId: r.user_id,
-            username: '',     // hydrate if you join users table
-            avatar: '',
+            username: r.username || '—',
+            avatar: (r.avatar), // normalize to /uploads/... if needed
             stories: []
           });
         }
-        byUser.get(r.user_id).stories.push({
-          url: '/' + r.source,
+  
+        // push each media item with meta
+        groups.get(userIdKey).stories.push({
+          url: (r.source),                     // normalize to /uploads/...
           type: r.is_photo === '1' ? 'image' : 'video',
+          // keep your meta (caption+stickers+music) for StoryViewer
           meta: {
             caption: r.text || undefined,
             overlays: safeJSON(r.overlays) || [],
             musicUrl: r.music_url || undefined,
-            musicVolume: typeof r.music_volume === 'number' ? r.music_volume : undefined
-          }
+            musicVolume: (typeof r.music_volume === 'number') ? r.music_volume : undefined,
+          },
+          // optional extras if your UI needs:
+          mediaId: r.media_id,
+          createdAt: r.media_time
         });
       }
-      res.json(Array.from(byUser.values()));
+  
+      res.json(Array.from(groups.values()));
     } catch (e) {
       console.error('GET /stories error', e);
       res.status(500).json({ error: 'Internal server error' });
