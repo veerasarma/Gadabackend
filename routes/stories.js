@@ -1,135 +1,139 @@
-// routes/stories.js
+// stories.js — DROP-IN
+// Requires: express, multer, path, fs; and a mysql2/promise pool passed in.
+
 const express = require('express');
-const router = express.Router();
-const pool = require('../config/db'); // mysql2/promise pool
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { ensureAuth } = require('../middlewares/auth'); // your existing auth middleware
+const  pool  = require('../config/db'); // adjust to your db path
+const {ensureAuth} = require('../middlewares/auth')
 
-// ---- storage for photos/videos/YYYY/MM ----
+const router = express.Router();
+
+const UPLOAD_ROOT = path.join(__dirname, '..', 'uploads', 'photos');
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const now = new Date();
-    const year = String(now.getFullYear());
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const bucket = file.mimetype.startsWith('video/') ? 'videos' : 'photos';
-    const dir = path.join(process.cwd(), 'uploads', bucket, year, month);
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
+    const folder = path.join(UPLOAD_ROOT, String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, '0'));
+    fs.mkdirSync(folder, { recursive: true });
+    cb(null, folder);
   },
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname || '');
-    const base = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    cb(null, `${base}${ext}`);
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '.jpg');
+    cb(null, `GADA_${Math.random().toString(16).slice(2)}${ext}`);
   },
 });
 const upload = multer({ storage });
 
-// helper to convert DB relative path "photos/2025/08/..."
-// into absolute url "http://host/uploads/photos/2025/08/..."
-function absUrl(req, relPath) {
-  const cleaned = String(relPath || '').replace(/^\/+/, ''); // ensure no leading slash
-  return `/uploads/${cleaned}`;
+function formatMySQLDate(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
+function safeJSON(s) { try { return s ? JSON.parse(s) : null; } catch { return null; } }
 
-/**
- * GET /api/stories
- * Return active stories in last 24h grouped by user
- * Shape matches storyService.ts: Story[]
- */
-router.get('/', ensureAuth, async (req, res) => {
-  try {
-    // Pull all story media in last 24h with user info
-    const [rows] = await pool.query(
-      `
-      SELECT s.story_id,
-             s.user_id,
-             u.user_name        AS username,
-             u.user_picture     AS avatar,
-             m.media_id,
-             m.source,
-             m.is_photo,
-             m.time
-        FROM stories s
-        JOIN stories_media m ON m.story_id = s.story_id
-        JOIN users u        ON u.user_id   = s.user_id
-       WHERE m.time >= (NOW() - INTERVAL 24 HOUR)
-       ORDER BY s.user_id ASC, m.time ASC
-      `
-    );
+  // CREATE (file + meta)
+  router.post('/', ensureAuth, upload.single('file'), async (req, res) => {
+    const conn = await pool.getConnection();
+    try {
+      if (!req.file) return res.status(400).json({ error: 'file is required' });
 
-    // Group by user
-    const groups = new Map();
-    for (const r of rows) {
-      const userId = String(r.user_id);
-      if (!groups.has(userId)) {
-        groups.set(userId, {
-          id: String(r.story_id),        // any story id in the group is fine
-          userId,
-          username: r.username || '—',
-          avatar: r.avatar ? (req, r.avatar) : '', // if avatars are stored in uploads too
-          stories: [],
+      const meta = safeJSON(req.body?.meta) || {};
+      const userId = req.user.userId; // adapt if your auth uses a different key
+      const now = new Date();
+
+      // relative path like photos/2025/09/GADA_xxx.jpg
+      const photosIdx = req.file.path.lastIndexOf(path.sep + 'photos' + path.sep);
+      const rel = photosIdx >= 0
+        ? req.file.path.substring(photosIdx + 1).replace(/\\/g, '/')
+        : 'photos/' + path.basename(req.file.path);
+
+      const isPhoto = req.file.mimetype.startsWith('image/') ? '1' : '0';
+      const caption = (meta.caption || '').toString();
+      const overlays = meta.overlays ? JSON.stringify(meta.overlays) : null;
+      const musicUrl = meta.musicUrl || null;
+      const musicVolume = typeof meta.musicVolume === 'number' ? meta.musicVolume : 0.8;
+
+      await conn.beginTransaction();
+
+      // Parent story row
+      const [storyR] = await conn.execute(
+        'INSERT INTO `stories` (`user_id`, `is_ads`, `time`) VALUES (?, ?, NOW())',
+        [userId, '0']
+      );
+      const storyId = storyR.insertId;
+
+      // Media row including caption (text) + new fields
+      await conn.execute(
+        `INSERT INTO stories_media
+         (story_id, source, is_photo, text, overlays, music_url, music_volume, time)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [storyId, rel, isPhoto, caption, overlays, musicUrl, musicVolume]
+      );
+
+      await conn.commit();
+
+      // Respond with a shape the frontend expects
+      res.status(201).json({
+        storyId,
+        userId,
+        url: '/' + rel, // your frontend prefixes with `${API_BASE_URL}/uploads`
+        type: isPhoto === '1' ? 'image' : 'video',
+        meta: {
+          caption: caption || undefined,
+          overlays: meta.overlays || [],
+          musicUrl: musicUrl || undefined,
+          musicVolume
+        }
+      });
+    } catch (e) {
+      try { await conn.rollback(); } catch {}
+      console.error('POST /stories error', e);
+      return res.status(500).json({ error: 'Internal server error' });
+    } finally {
+      conn.release();
+    }
+  });
+
+  // LIST stories (map DB → viewer-friendly shape)
+  router.get('/', ensureAuth, async (req, res) => {
+    try {
+      const [rows] = await pool.query(
+        `SELECT s.story_id, s.user_id, s.time AS story_time,
+                m.media_id, m.source, m.is_photo, m.text,
+                m.overlays, m.music_url, m.music_volume, m.time AS media_time
+         FROM stories s
+         JOIN stories_media m ON m.story_id = s.story_id
+         ORDER BY s.time DESC, m.media_id ASC`
+      );
+
+      const byUser = new Map();
+      for (const r of rows) {
+        if (!byUser.has(r.user_id)) {
+          byUser.set(r.user_id, {
+            userId: r.user_id,
+            username: '',     // hydrate if you join users table
+            avatar: '',
+            stories: []
+          });
+        }
+        byUser.get(r.user_id).stories.push({
+          url: '/' + r.source,
+          type: r.is_photo === '1' ? 'image' : 'video',
+          meta: {
+            caption: r.text || undefined,
+            overlays: safeJSON(r.overlays) || [],
+            musicUrl: r.music_url || undefined,
+            musicVolume: typeof r.music_volume === 'number' ? r.music_volume : undefined
+          }
         });
       }
-      groups.get(userId).stories.push({
-        id: String(r.media_id),
-        url: (req, r.source),                // convert 'photos/...'
-        type: r.is_photo === '1' ? 'image' : 'video',
-        createdAt: r.time,
-      });
+      res.json(Array.from(byUser.values()));
+    } catch (e) {
+      console.error('GET /stories error', e);
+      res.status(500).json({ error: 'Internal server error' });
     }
+  });
 
-    res.json(Array.from(groups.values()));
-  } catch (e) {
-    console.error('[GET /api/stories] ', e);
-    res.status(500).json({ error: 'Failed to load stories' });
-  }
-});
 
-/**
- * POST /api/stories
- * field name: "media" (single file)
- * Creates a story row and 1 media item.
- */
-router.post('/', ensureAuth, upload.single('media'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No media uploaded' });
-
-    // Determine relative DB path like "photos/YYYY/MM/filename"
-    const rel = path
-      .relative(
-        path.join(process.cwd(), 'uploads'),
-        req.file.path
-      )
-      .replace(/\\/g, '/'); // windows-safe
-
-    // 1) create story group for this user
-    const [storyRes] = await pool.query(
-      `INSERT INTO stories (user_id, is_ads, time) VALUES (?, '0', NOW())`,
-      [req.user.userId]
-    );
-    const storyId = storyRes.insertId;
-
-    // 2) create media
-    const isPhoto = req.file.mimetype.startsWith('video/') ? '0' : '1';
-    const [mediaRes] = await pool.query(
-      `INSERT INTO stories_media (story_id, source, is_photo, text, time)
-       VALUES (?, ?, ?, '', NOW())`,
-      [storyId, rel, isPhoto]
-    );
-
-    const out = {
-      id: String(storyId),
-      url: absUrl(req, rel),
-      type: isPhoto === '1' ? 'image' : 'video',
-      mediaId: String(mediaRes.insertId),
-    };
-    res.status(201).json(out);
-  } catch (e) {
-    console.error('[POST /api/stories] ', e);
-    res.status(500).json({ error: 'Upload failed' });
-  }
-});
 
 module.exports = router;
