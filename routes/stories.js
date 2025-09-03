@@ -116,7 +116,7 @@ function safeJSON(s) { try { return s ? JSON.parse(s) : null; } catch { return n
           FROM stories s
           JOIN stories_media m ON m.story_id = s.story_id
           JOIN users        u  ON u.user_id  = s.user_id
-         -- WHERE m.time >= (NOW() - INTERVAL 24 HOUR)
+         WHERE m.time >= (NOW() - INTERVAL 24 HOUR)
          ORDER BY s.time DESC, m.media_id ASC
         `
       );
