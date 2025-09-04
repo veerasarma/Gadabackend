@@ -21,6 +21,20 @@ function sortSafe(v) {
   }
 }
 
+
+async function getOption(conn, name) {
+  const [rows] = await conn.query(
+    `SELECT option_value
+       FROM system_options
+      WHERE LOWER(option_name) = LOWER(?)
+      LIMIT 1`,
+    [name]
+  );
+  return rows.length ? rows[0].option_value : null;
+}
+
+
+
 // Map DB node_type → friendly "From"
 function prettyFrom(nodeType) {
   switch (nodeType) {
@@ -53,57 +67,52 @@ router.get('/testing', async (req, res, next)=> {
  * GET /api/points/overview
  * Returns points rules (from system config), current balances and remaining daily points.
  */
-router.get('/overview', ensureAuth, async (req, res, next)=> {
+router.get('/overview', ensureAuth, async (req, res) => {
+  const userId = req.user.userId;
+  console.log(userId,'userId')
+  const conn = await pool.getConnection();
   try {
-    const userId = req.user.userId;
-
-    // ---- Pull rules from your loaded system config (middleware attached) ----
-    // Fallbacks are safe defaults if a key is missing.
-    const sys = (req.system) || {};
-    const result = await checkActivePackage(userId);
-    console.log(result,userId)
-    let daily_limit = (result.active)?sys.points_limit_pro:sys.points_limit_user ?? 1000
-    const rules = {
-      post_create: Number(sys.points_per_post ?? 10),
-      post_view: Number(sys.points_per_post_view ?? 1),
-      post_comment: Number(sys.points_per_post_comment ?? 5),
-      follow: Number(sys.points_per_follow ?? 5),
-      refer: Number(sys.points_per_referred ?? 5),
-      daily_limit: Number(daily_limit ?? 1000),
-      conversion: {
-        // “Each 10 points equal ₦1” → 10 points per naira
-        pointsPerNaira: Number(sys.POINTS_PER_NAIRA ?? 10),
-        nairaPerPoint: 1 / Number(sys.POINTS_PER_NAIRA ?? 10)
-      }
-    };
-
-
-    // ---- user balances (you already keep user_points & user_wallet_balance) ----
-    const [balRows] = await pool.query(
-      `SELECT user_points AS points, user_wallet_balance AS money
-         FROM users WHERE user_id = ? LIMIT 1`,
+    // balances
+    const [urows] = await conn.query(
+      `SELECT user_points, user_wallet_balance
+         FROM users
+        WHERE user_id = ?
+        LIMIT 1`,
       [userId]
     );
-    const balances = balRows.length
-      ? { points: Number(balRows[0].points || 0), money: Number(balRows[0].money || 0) }
-      : { points: 0, money: 0 };
+    if (!urows.length) return res.status(404).json({ error: 'User not found' });
 
-    // ---- daily remaining: sum points earned in last X hours (default 24) ----
-    const windowHrs = Number(sys.POINTS_RESET_WINDOW_HOURS ?? 24);
-    const [sumRows] = await pool.query(
-      `SELECT COALESCE(SUM(points),0) AS earned
-         FROM log_points
-        WHERE user_id = ?
-          AND time >= (NOW() - INTERVAL ? HOUR)`,
-      [userId, windowHrs]
-    );
-    const earned = Number(sumRows[0].earned || 0);
-    const remainingToday = Math.max(0, rules.daily_limit - earned);
+    // settings
+    const enabledRaw = await getOption(conn, 'points_money_transfer_enabled');
+    const pointsPerCurrencyRaw = await getOption(conn, 'points_per_currency');
 
-    res.json({ rules, balances, remainingToday, windowHours: windowHrs });
-  } catch (err) {
-    console.error('[points/overview]', err);
-    res.status(500).json({ error: 'Failed to load points overview' });
+    const enabled = String(enabledRaw ?? '0').trim() === '1' || /^true$/i.test(String(enabledRaw));
+    const pointsPerCurrency = Number(pointsPerCurrencyRaw) > 0 ? Number(pointsPerCurrencyRaw) : 10; // default safeguard
+
+    // shape matches what your PointsPage already expects (see conversion usage)
+    return res.json({
+      balances: {
+        points: Number(urows[0].user_points) || 0,
+        money: Number(urows[0].user_wallet_balance) || 0,
+      },
+      rules: {
+        conversion: {
+          // your UI shows: "Each X points equal ₦1"
+          pointsPerNaira: pointsPerCurrency,
+          enabled,
+        },
+        // keep room for other rules your UI shows (post_create, etc.) if you already return them
+        post_create: 0, post_view: 0, post_comment: 0, follow: 0, refer: 0,
+        daily_limit: 0,
+      },
+      remainingToday: 0,
+      windowHours: 24,
+    });
+  } catch (e) {
+    console.error('[points/overview]', e);
+    res.status(500).json({ error: 'Failed to load overview' });
+  } finally {
+    conn.release();
   }
 });
 
@@ -169,6 +178,87 @@ router.get('/logs', ensureAuth, async (req, res) => {
   } catch (err) {
     console.error('[points/logs]', err);
     res.status(500).json({ error: 'Failed to load transactions' });
+  }
+});
+
+router.post('/transfer', ensureAuth, async (req, res) => {
+  const userId = req.user.userId;
+  const pointsRequested = Number(req.body?.points);
+
+  if (!Number.isFinite(pointsRequested) || pointsRequested <= 0) {
+    return res.status(400).json({ error: 'Invalid points amount' });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // Read config
+    const enabledRaw = await getOption(conn, 'points_money_transfer_enabled');
+    const pointsPerCurrencyRaw = await getOption(conn, 'points_per_currency');
+
+    const enabled = String(enabledRaw ?? '0').trim() === '1' || /^true$/i.test(String(enabledRaw));
+    if (!enabled) {
+      await conn.rollback();
+      return res.status(403).json({ error: 'Points to money transfer is disabled' });
+    }
+
+    const PPC = Number(pointsPerCurrencyRaw);
+    if (!Number.isFinite(PPC) || PPC <= 0) {
+      await conn.rollback();
+      return res.status(500).json({ error: 'Invalid conversion setting' });
+    }
+
+    // Lock row, validate balance
+    const [rows] = await conn.query(
+      `SELECT user_points, user_wallet_balance
+         FROM users
+        WHERE user_id = ?
+        FOR UPDATE`,
+      [userId]
+    );
+    if (!rows.length) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const currentPoints = Number(rows[0].user_points) || 0;
+    if (pointsRequested > currentPoints) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Insufficient points balance' });
+    }
+
+    // money = points / PPC  (Each PPC points = ₦1)
+    const moneyGainedRaw = pointsRequested / PPC;
+    // round to 2 decimals
+    const moneyGained = Math.round((moneyGainedRaw + Number.EPSILON) * 100) / 100;
+
+    // Apply transfer
+    await conn.query(
+      `UPDATE users
+          SET user_points = user_points - ?,
+              user_wallet_balance = user_wallet_balance + ?
+        WHERE user_id = ?`,
+      [pointsRequested, moneyGained, userId]
+    );
+
+    await conn.commit();
+
+    return res.json({
+      ok: true,
+      moved: { points: pointsRequested, money: moneyGained },
+      balances: {
+        points: currentPoints - pointsRequested,
+        money: Number(rows[0].user_wallet_balance) + moneyGained,
+      },
+      ppc: PPC,
+    });
+  } catch (e) {
+    console.error('[points/transfer]', e);
+    try { await conn.rollback(); } catch {}
+    res.status(500).json({ error: 'Transfer failed' });
+  } finally {
+    conn.release();
   }
 });
 
