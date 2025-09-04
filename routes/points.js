@@ -71,6 +71,7 @@ router.get('/overview', ensureAuth, async (req, res) => {
   const userId = req.user.userId;
   console.log(userId,'userId')
   const conn = await pool.getConnection();
+  const sys = (req.system) || {};
   try {
     // balances
     const [urows] = await conn.query(
@@ -89,6 +90,23 @@ router.get('/overview', ensureAuth, async (req, res) => {
     const enabled = String(enabledRaw ?? '0').trim() === '1' || /^true$/i.test(String(enabledRaw));
     const pointsPerCurrency = Number(pointsPerCurrencyRaw) > 0 ? Number(pointsPerCurrencyRaw) : 10; // default safeguard
 
+    // ---- daily remaining: sum points earned in last X hours (default 24) ----
+    const windowHrs = Number(sys.POINTS_RESET_WINDOW_HOURS ?? 24);
+    const [sumRows] = await pool.query(
+      `SELECT COALESCE(SUM(points),0) AS earned
+         FROM log_points
+        WHERE user_id = ?
+          AND time >= (NOW() - INTERVAL ? HOUR)`,
+      [userId, windowHrs]
+    );
+
+    const result = await checkActivePackage(userId);
+    console.log(result,userId)
+    let daily_limit = (result.active)?sys.points_limit_pro:sys.points_limit_user ?? 1000
+
+    const earned = Number(sumRows[0].earned || 0);
+    const remainingToday = Math.max(0, daily_limit - earned);
+
     // shape matches what your PointsPage already expects (see conversion usage)
     return res.json({
       balances: {
@@ -102,10 +120,14 @@ router.get('/overview', ensureAuth, async (req, res) => {
           enabled,
         },
         // keep room for other rules your UI shows (post_create, etc.) if you already return them
-        post_create: 0, post_view: 0, post_comment: 0, follow: 0, refer: 0,
-        daily_limit: 0,
+        post_create: Number(sys.points_per_post ?? 10),
+      post_view: Number(sys.points_per_post_view ?? 1),
+      post_comment: Number(sys.points_per_post_comment ?? 5),
+      follow: Number(sys.points_per_follow ?? 5),
+      refer: Number(sys.points_per_referred ?? 5),
+      daily_limit: Number(daily_limit ?? 1000),
       },
-      remainingToday: 0,
+      remainingToday: remainingToday,
       windowHours: 24,
     });
   } catch (e) {

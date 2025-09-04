@@ -26,6 +26,44 @@ function initSocket(httpServer) {
   io.on('connection', (socket) => {
     const userId = socket.user.id;
     socket.join(`user:${userId}`);
+
+       // ----- CALL SIGNALING (audio/video) -----
+    // callee/caller both join the room so messages are scoped
+    socket.on('call:join', ({ room }) => {
+      console.log('calling here',room)
+      if (!room) return;
+      socket.join(room);
+    });
+
+    // caller sends offer → notify callee in their personal room
+    socket.on('call:offer', ({ toUserId, conversationId, kind, room, callId, sdp }) => {
+      console.log('call:offer,',toUserId, conversationId, kind, room, callId, sdp)
+      if (!toUserId || !room || !sdp) return;
+      socket.join(room); // ensure caller is in the room too
+      io.to(`user:${toUserId}`).emit('call:offer', {
+        fromUserId: userId, conversationId, kind, room, callId, sdp
+      });
+    });
+
+    // callee answers → only the peer in the room gets it
+    socket.on('call:answer', ({ room, sdp, callId, kind, conversationId }) => {
+      if (!room || !sdp) return;
+      socket.to(room).emit('call:answer', { room, sdp, callId, kind, conversationId });
+    });
+
+    // ICE candidates both ways (room-scoped)
+    socket.on('call:candidate', ({ room, candidate }) => {
+      if (!room || !candidate) return;
+      socket.to(room).emit('call:candidate', { room, candidate });
+    });
+
+    // hangup
+    socket.on('call:end', ({ room }) => {
+      if (!room) return;
+      socket.to(room).emit('call:end', { room });
+      socket.leave(room);
+    });
+
     // optional: emit backlog count on connect
   });
 

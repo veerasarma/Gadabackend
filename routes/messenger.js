@@ -8,6 +8,7 @@ const { ensureAuth } = require('../middlewares/auth');
 const { getIO } = require('../socket');
 const router = express.Router();
 const { createNotification } = require('../services/notificationService');
+const crypto = require('crypto');
 
 /* ---------- uploads (images / voice) ---------- */
 function ensureDirSync(dir) {
@@ -416,4 +417,51 @@ router.post('/conversations/:id/typing', ensureAuth, async (req, res) => {
   }
 });
 
+
+// Helper
+function tableFor(type) { return type === 'video' ? 'conversations_calls_video' : 'conversations_calls_audio'; }
+function nowSql() { return new Date().toISOString().slice(0, 19).replace('T', ' '); }
+
+// START call
+router.post('/call/start', ensureAuth, async (req, res) => {
+  const { conversationId, toUserId, type } = req.body || {};
+  const fromUserId = req.user.userId;
+  if (!toUserId || !type) return res.status(400).json({ error: 'Missing fields' });
+
+  const room = crypto.randomBytes(16).toString('hex');
+  const table = tableFor(type);
+  const conn = await pool.getConnection();
+  try {
+    const [ins] = await conn.query(
+      `INSERT INTO ${table} (from_user_id, from_user_token, to_user_id, to_user_token, room, answered, declined, created_time, updated_time)
+       VALUES (?, '', ?, '', ?, '0', '0', ?, ?)`,
+      [fromUserId, toUserId, room, nowSql(), nowSql()]
+    );
+    res.json({ room, callId: ins.insertId });
+  } finally { conn.release(); }
+});
+
+// ANSWER call
+router.post('/call/answer', ensureAuth, async (req, res) => {
+  const { callId, type } = req.body || {};
+  const table = tableFor(type);
+  await pool.query(
+    `UPDATE ${table} SET answered='1', updated_time=? WHERE call_id=?`,
+    [nowSql(), callId]
+  );
+  res.json({ ok: true });
+});
+
+// END/DECLINE call
+router.post('/call/end', ensureAuth, async (req, res) => {
+  const { callId, type, declined } = req.body || {};
+  const table = tableFor(type);
+  await pool.query(
+    `UPDATE ${table} SET declined=?, updated_time=? WHERE call_id=?`,
+    [declined ? '1' : '0', nowSql(), callId]
+  );
+  res.json({ ok: true });
+});
+
+module.exports = router;
 module.exports = router;
