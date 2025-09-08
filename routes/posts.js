@@ -412,7 +412,6 @@ router.get('/', ensureAuth, async (req, res) => {
         : Promise.resolve([])
       ),
     ]);
-    console.log(liveThumbRows,'livePostIdslivePostIds')
 
     // 8) stitch (preserve helpers, but keep boosted flags!)
     const byId = new Map(rows.map(p => [p.post_id, mapPostRow(p)]));
@@ -443,7 +442,6 @@ router.get('/', ensureAuth, async (req, res) => {
         pushedLive.add(lt.post_id);
       }
     }
-    console.log(pushedLive,'pushedLivepushedLivepushedLive')
 
     // existing likes list (kept for backward compatibility)
     for (const l of likeRows) {

@@ -68,7 +68,7 @@ app.use(
 app.use(
   cors({
     origin: process.env.CLIENT_ORIGIN || "http://localhost:5173",
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "POST", "PUT", "DELETE","PATCH"],
     credentials: true,
   })
 );
@@ -170,7 +170,12 @@ app.use(
   "/api/admin/settings/points",
   require("./routes/admin/adminPointsSettings")
 );
+app.use("/api/admin/ads", require("./routes/admin/admin.ads.routes"));
+app.use("/api/admin/adssettings", require("./routes/admin/admin.ads.settings"));
 app.use('/api/live', require('./routes/live'));
+app.use("/api/ads", require("./routes/ads.routes"));
+
+
 
 
 app.get("/", (_req, res) => res.send("API is running"));
