@@ -170,6 +170,7 @@ app.use(
   "/api/admin/settings/points",
   require("./routes/admin/adminPointsSettings")
 );
+app.use('/api/live', require('./routes/live'));
 
 
 app.get("/", (_req, res) => res.send("API is running"));

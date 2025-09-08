@@ -37,10 +37,10 @@ function initSocket(httpServer) {
 
     // caller sends offer → notify callee in their personal room
     socket.on('call:offer', ({ toUserId, conversationId, kind, room, callId, sdp }) => {
-      console.log('call:offer,',toUserId, conversationId, kind, room, callId, sdp)
+      // console.log('call:offer,',toUserId, conversationId, kind, room, callId, sdp)
       if (!toUserId || !room || !sdp) return;
       socket.join(room); // ensure caller is in the room too
-      io.to(`user:${toUserId}`).emit('call:offer', {
+      io.to(`user:${Number(toUserId)}`).emit('call:offer', {
         fromUserId: userId, conversationId, kind, room, callId, sdp
       });
     });

@@ -41,7 +41,7 @@ router.get('/overview', ensureAuth, async (req, res) => {
 
     // settings
     const S = await loadOptions('affiliates_'); // all keys given in the spec
-    console.log(S,'SSS')
+    
     const enabled  = String(S['affiliates_enabled'] || '0') === '1';
     const levels   = Math.max(1, Number(S['affiliates_levels'] || 1));
     const minWd    = Number(S['affiliates_min_withdrawal'] || 0);

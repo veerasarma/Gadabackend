@@ -37,28 +37,28 @@ exports.getProfile = (req, res) => {
 exports.activation = async (req, res, next) => {
   try {
     const emailverificationcode = req.body;
-    console.log(emailverificationcode, "emailverificationcode");
+    // console.log(emailverificationcode, "emailverificationcode");
     if (!emailverificationcode?.token)
       throw new ValidationException("Send valid emailverificationcode");
     let token = emailverificationcode.token;
-    console.log(token, "tokentokentoken");
+    // console.log(token, "tokentokentoken");
     const whereQuery = "user_email_verification_code = " + token;
     const [user] = await db.query(
       `SELECT user_id FROM users WHERE ${whereQuery}`
     );
-    console.log(user, "useruser");
+    // console.log(user, "useruser");
     if (user != "") {
-      console.log(user, "user");
+      // console.log(user, "user");
       let user_id = user[0].user_id;
-      console.log(user_id, "user");
+      // console.log(user_id, "user");
 
-      console.log("first if");
+      // console.log("first if");
       let updatedata = await db.query(
         'UPDATE users SET user_approved = "1" WHERE user_id = ?',
         [user_id]
       );
       if (updatedata) {
-        console.log("second if", updatedata);
+        // console.log("second if", updatedata);
         res.json({ status: "success", userdata: user_id });
       }
     } else {
@@ -163,7 +163,7 @@ exports.signUp = async (req, res, next) => {
     );
 
     const user_id = insertResult.insertId;
-    console.log(refInfo,'refInforefInforefInfo')
+    // console.log(refInfo,'refInforefInforefInfo')
     let referrerId = null;
     if (refInfo) {
       let rows;
@@ -198,8 +198,8 @@ exports.signUp = async (req, res, next) => {
       //   const body = getEmailTemplate('activation_email', subject, { name, email_verification_code });
       //   console.log("after mail tesmpl")
       //   await sendEmail(args.email, subject, body.html, body.plain);
-      console.log(system.system_url, "system.system_url");
-      console.log(system.system_title, "system.system_title");
+      // console.log(system.system_url, "system.system_url");
+      // console.log(system.system_title, "system.system_title");
 
       
       const mailheader = {
@@ -214,7 +214,7 @@ exports.signUp = async (req, res, next) => {
           system_title: system.system_title,
         },
       });
-      console.log("after send mail ");
+      // console.log("after send mail ");
       // } else {
       //   const message = `${system.system_title} Activation Code: ${phone_verification_code}`;
       //   await sendSMS(args.phone, message);
@@ -596,7 +596,7 @@ const checkIP = async (ip, system) => {
 };
 
 async function getUserByEmail(email, system) {
-  console.log("valid email", email);
+  // console.log("valid email", email);
   const emailDomain = email.split("@")[1];
   const domainParts = emailDomain.split(".");
   const emailLastDomain = `${domainParts[domainParts.length - 2]}.${
@@ -716,12 +716,12 @@ exports.signIn = async (req, res, next) => {
       // JWT generation
       
       const roles = user.user_group==1?'admin':(user.user_group==3?'user':'moderator'); // returns ['admin'] | ['user']...
-      console.log(roles,'rolesrolesroles')
+
       const payload = { userId: user.user_id,email: user.email, roles };
       user.role = roles;
 
       const pkg = await checkActivePackage(user.user_id).catch(() => ({ active: false }));
-      console.log(pkg,'pkgpkg')
+
       user.packageactive = pkg.active;
       user.packageName = pkg.packageName;
 
