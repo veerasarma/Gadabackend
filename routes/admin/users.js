@@ -102,7 +102,7 @@ router.put(
 
       if (username != null) { fields.push("user_name = ?"); values.push(String(username)); }
       if (email != null)    { fields.push("user_email = ?"); values.push(String(email)); }
-      if (phone != null)    { fields.push("user_phone = ?"); values.push(String(phone)); }
+      if (phone != null && phone != '')    { fields.push("user_phone = ?"); values.push(String(phone)); }
       if (firstName != null){ fields.push("user_firstname = ?"); values.push(String(firstName)); }
       if (lastName != null) { fields.push("user_lastname = ?"); values.push(String(lastName)); }
       if (gender != null)   { fields.push("user_gender = ?"); values.push(String(gender)); }
