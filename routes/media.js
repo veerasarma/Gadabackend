@@ -37,7 +37,6 @@ const storage = multer.diskStorage({
     const year = String(now.getFullYear());
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const dir = path.join(process.cwd(), 'uploads', bucket, year, month);
-    console.log(dir,'dirdirdir')
     fs.mkdir(dir, { recursive: true }, (err) => cb(err, dir));
   },
   filename: (req, file, cb) => {
@@ -61,10 +60,13 @@ function fileFilter(req, file, cb) {
   }
 }
 
-const upload = multer({ storage, fileFilter, limits: {
-  fileSize: 10 * 1024 * 1024   // max 10 MB per file
-}});
-
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: {
+    fileSize: 200 * 1024 * 1024   // max 200 MB per file
+  }
+});
 // 4) route with error handling
 router.post('/upload', ensureAuth,(req, res) => {
   upload.array('files', 5)(req, res, err => {
