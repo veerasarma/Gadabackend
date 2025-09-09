@@ -39,17 +39,17 @@ async function handleSingleView({ req, postId, viewerId }) {
     }
 
     // 3) Check de-dup window per viewer+post
-    // const [seenRows] = await conn.query(
-    //   `SELECT id FROM post_view_events
-    //     WHERE post_id=? AND viewer_id=? AND time >= (NOW() - INTERVAL ? HOUR)
-    //     LIMIT 1`,
-    //   [postId, viewerId, dedupHours]
-    // );
-    // if (seenRows.length) {
-    //   await conn.rollback();
-    //   conn.release();
-    //   return { ok: true, awarded: 0, reason: 'dedup_window' };
-    // }
+    const [seenRows] = await conn.query(
+      `SELECT id FROM post_view_events
+        WHERE post_id=? AND viewer_id=? AND time >= (NOW() - INTERVAL ? HOUR)
+        LIMIT 1`,
+      [postId, viewerId, dedupHours]
+    );
+    if (seenRows.length) {
+      await conn.rollback();
+      conn.release();
+      return { ok: true, awarded: 0, reason: 'dedup_window' };
+    }
 
     // 4) Insert a view event (gives us a unique id to use as nodeId)
     const [ins] = await conn.query(

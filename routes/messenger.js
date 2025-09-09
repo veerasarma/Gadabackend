@@ -463,5 +463,153 @@ router.post('/call/end', ensureAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-module.exports = router;
+function asInt(v) { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 0; }
+
+// Find an existing 1:1 conversation (not group) containing exactly both users.
+// If not found, create it and attach both participants.
+async function ensureDirectConversation(conn, aUserId, bUserId) {
+  const u1 = Math.min(aUserId, bUserId);
+  const u2 = Math.max(aUserId, bUserId);
+
+  // Try to locate existing direct conversation:
+  // must have 2 rows in conversations_users for these users and conversations.is_group='0'
+  const [rows] = await conn.query(
+    `
+    SELECT cu1.conversation_id
+      FROM conversations_users cu1
+      JOIN conversations_users cu2
+        ON cu2.conversation_id = cu1.conversation_id
+       AND cu2.user_id = ?
+      JOIN conversations c
+        ON c.conversation_id = cu1.conversation_id
+     WHERE cu1.user_id = ?
+       AND c.is_group = '0'
+     LIMIT 1
+    `,
+    [u2, u1]
+  );
+  if (rows.length) return rows[0].conversation_id;
+
+  // Create a new conversation
+  const [insC] = await conn.query(
+    `INSERT INTO conversations (last_message_id, color, node_id, node_type, is_group)
+     VALUES (0, NULL, NULL, NULL, '0')`
+  );
+  const conversationId = insC.insertId;
+
+  // Add both users to pivot (ignore dup if unique kicks in)
+  await conn.query(
+    `INSERT INTO conversations_users (conversation_id, user_id, seen, typing, deleted)
+     VALUES (?, ?, '0', '0', '0'), (?, ?, '0', '0', '0')
+     ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)`,
+    [conversationId, u1, conversationId, u2]
+  );
+
+  return conversationId;
+}
+
+// ---------- route: POST /api/messages/story-reply ----------
+router.post('/story-reply', ensureAuth, async (req, res) => {
+  const senderId = asInt(req.user.userId);
+  const storyId  = asInt(req.body?.storyId);
+  const toUserId = asInt(req.body?.toUserId);
+  const text     = (req.body?.text || '').toString();
+  const emojiCode = req.body?.emojiCode ? asInt(req.body.emojiCode) : null;
+  const previewUrl = (req.body?.previewUrl || null);
+
+  if (!storyId || !toUserId) {
+    return res.status(400).json({ ok: false, error: 'storyId and toUserId are required' });
+  }
+  if (!text.trim() && !emojiCode) {
+    return res.status(400).json({ ok: false, error: 'Provide text or emojiCode' });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // 1) Verify story exists & belongs to target author (lock row)
+    const [[story]] = await conn.query(
+      `SELECT story_id, user_id, is_ads, time
+         FROM stories
+        WHERE story_id = ?
+        FOR UPDATE`,
+      [storyId]
+    );
+    if (!story) {
+      await conn.rollback();
+      return res.status(404).json({ ok: false, error: 'Story not found' });
+    }
+    if (Number(story.user_id) !== Number(toUserId)) {
+      await conn.rollback();
+      return res.status(400).json({ ok: false, error: 'toUserId must be the story author' });
+    }
+
+    // 2) Latest media for preview/type (if any)
+    const [[media]] = await conn.query(
+      `SELECT media_id, source, is_photo, text, overlays, music_url, music_volume, time
+         FROM stories_media
+        WHERE story_id = ?
+        ORDER BY time DESC
+        LIMIT 1`,
+      [storyId]
+    );
+
+    let story_type = 'text';
+    let story_preview_url = null;
+    if (media && media.source && String(media.source).trim().length > 0) {
+      story_type = media.is_photo === '1' ? 'image' : 'video';
+      story_preview_url = previewUrl || `/uploads/${media.source}`;
+    }
+
+    // 3) Build a compact JSON envelope to embed in the message body
+    // (your messages table has no meta column, so we prefix with ::meta::)
+    const meta = {
+      kind: 'story_reply',
+      story_id: storyId,
+      story_type,
+      story_preview_url,
+      reply: { emoji_code: emojiCode || null, text: text.trim() || null },
+    };
+    const envelope = `::meta::${JSON.stringify(meta)}::/meta::`;
+    const bodyToStore = `${envelope}${text || ''}`; // UI can parse envelope then show ribbon + message
+
+    // 4) Get or create 1:1 conversation using conversations_users pivot
+    const conversationId = await ensureDirectConversation(conn, senderId, toUserId);
+
+    // 5) Insert message
+    const [msgIns] = await conn.query(
+      `INSERT INTO conversations_messages (conversation_id, user_id, message, image, voice_note, time)
+       VALUES (?, ?, ?, '', '', NOW())`,
+      [conversationId, senderId, bodyToStore]
+    );
+    const messageId = msgIns.insertId;
+
+    // 6) Update conversation's last_message_id
+    await conn.query(
+      `UPDATE conversations SET last_message_id = ? WHERE conversation_id = ?`,
+      [messageId, conversationId]
+    );
+
+    // 7) (optional) analytics row
+    try {
+      await conn.query(
+        `INSERT INTO stories_replies_log (story_id, from_user_id, to_user_id, emoji_code, created_at)
+         VALUES (?, ?, ?, ?, NOW())`,
+        [storyId, senderId, toUserId, emojiCode || null]
+      );
+    } catch (_) { /* table may not exist; ignore */ }
+
+    await conn.commit();
+    return res.json({ ok: true, conversationId, messageId });
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    console.error('story-reply error:', err);
+    return res.status(500).json({ ok: false, error: 'Failed to send story reply' });
+  } finally {
+    conn.release();
+  }
+});
+
+
 module.exports = router;

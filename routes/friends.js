@@ -176,52 +176,93 @@ router.get('/list', ensureAuth, async (req, res) => {
  *  - no accepted friendship with me
  *  - no pending request in either direction
  */
+// router.get('/suggestions', ensureAuth, async (req, res) => {
+//   try {
+//     const me = Number(req.user.userId);
+//     const [rows] = await pool.query(
+//       `
+//       SELECT 
+//         u.user_id,
+//         u.user_name,
+//         COALESCE(u.user_picture, u.user_picture) AS profileImage
+//       FROM users u
+//       WHERE u.user_id <> ?
+//         AND COALESCE(u.user_approved, '1') = '1'  -- drop/adjust if you don’t use this flag
+
+//         -- no accepted friendship either direction
+//         AND NOT EXISTS (
+//           SELECT 1 FROM friends fr
+//            WHERE ((fr.user_one_id = u.user_id AND fr.user_two_id = ?)
+//                OR (fr.user_one_id = ?        AND fr.user_two_id = u.user_id))
+//              AND fr.status = 'accepted'
+//         )
+
+//         -- no pending request either direction
+//         AND NOT EXISTS (
+//           SELECT 1 FROM friends fr
+//            WHERE ((fr.user_one_id = u.user_id AND fr.user_two_id = ?)
+//                OR (fr.user_one_id = ?        AND fr.user_two_id = u.user_id))
+//              AND fr.status = 'pending'
+//         )
+
+//       ORDER BY u.user_name
+//       LIMIT 10
+//       `,
+//       [me, me, me, me, me]
+//     );
+
+//     res.json(
+//       rows.map(r => ({
+//         user_id: String(r.user_id),
+//         user_name: r.user_name,
+//         profileImage: r.profileImage || null,
+//       }))
+//     );
+//   } catch (e) {
+//     console.error('[GET /friends/suggestions]', e);
+//     res.status(500).json({ error: 'Failed to load suggestions' });
+//   }
+// });
+
 router.get('/suggestions', ensureAuth, async (req, res) => {
+  const viewer = Number(req.user.userId);
+  const limit = Math.min(Number(req.query.limit) || 20, 50);
+  const afterId = Number(req.query.afterId) || 0;
+
   try {
-    const me = Number(req.user.userId);
     const [rows] = await pool.query(
       `
-      SELECT 
-        u.user_id,
-        u.user_name,
-        COALESCE(u.user_picture, u.user_picture) AS profileImage
+      SELECT u.user_id, u.user_name, u.user_picture
       FROM users u
+      LEFT JOIN (
+        SELECT user_two_id AS other_id
+        FROM friends
+        WHERE user_one_id = ? AND status IN (1,0,-1)
+        UNION ALL
+        SELECT user_one_id AS other_id
+        FROM friends
+        WHERE user_two_id = ? AND status IN (1,0,-1)
+      ) c ON c.other_id = u.user_id
       WHERE u.user_id <> ?
-        AND COALESCE(u.user_approved, '1') = '1'  -- drop/adjust if you don’t use this flag
-
-        -- no accepted friendship either direction
-        AND NOT EXISTS (
-          SELECT 1 FROM friends fr
-           WHERE ((fr.user_one_id = u.user_id AND fr.user_two_id = ?)
-               OR (fr.user_one_id = ?        AND fr.user_two_id = u.user_id))
-             AND fr.status = 'accepted'
-        )
-
-        -- no pending request either direction
-        AND NOT EXISTS (
-          SELECT 1 FROM friends fr
-           WHERE ((fr.user_one_id = u.user_id AND fr.user_two_id = ?)
-               OR (fr.user_one_id = ?        AND fr.user_two_id = u.user_id))
-             AND fr.status = 'pending'
-        )
-
-      ORDER BY u.user_name
-      LIMIT 10
-      `,
-      [me, me, me, me, me]
+        AND c.other_id IS NULL
+        AND u.user_id > ?
+      ORDER BY u.user_id
+      LIMIT ?`,
+      [viewer, viewer, viewer, afterId, limit]
     );
-
     res.json(
-      rows.map(r => ({
-        user_id: String(r.user_id),
-        user_name: r.user_name,
-        profileImage: r.profileImage || null,
-      }))
-    );
+            rows.map(r => ({
+              user_id: String(r.user_id),
+              user_name: r.user_name,
+              profileImage: r.user_picture || null,
+            })))
+    // res.json({ items: rows, nextAfterId: rows.at(-1)?.user_id || afterId });
   } catch (e) {
-    console.error('[GET /friends/suggestions]', e);
+    console.error(e);
     res.status(500).json({ error: 'Failed to load suggestions' });
   }
 });
+
+
 
 module.exports = router;

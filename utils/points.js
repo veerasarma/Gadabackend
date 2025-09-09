@@ -100,7 +100,7 @@ async function creditPoints({
          VALUES (?, ?, ?, ?, NOW())`,
         [userId, nodeId, normalizedType, toAward]
       );
-      console.log(toAward,typeof toAward)
+      // console.log(toAward,typeof toAward)
       // Update user_points
       await conn.query(
         `UPDATE users
