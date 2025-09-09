@@ -78,6 +78,18 @@ router.post("/campaigns", ensureAuth, async (req, res) => {
   if (isNaN(b.campaign_budget) || b.campaign_budget <= 0)
     return bad(res, "Budget must be > 0");
 
+    // 1) Wallet must cover budget at creation time
+    const [[u]] = await pool.query(
+      "SELECT user_wallet_balance FROM users WHERE user_id=?",
+      [req.user.userId]
+    );
+    if (!u) {
+      return res.status(404).json({ ok: false, error: "User not found" });
+    }
+    if (Number(u.user_wallet_balance || 0) < b.campaign_budget) {
+      return res.status(400).json({ ok: false, error: "Insufficient wallet balance for selected budget" });
+    }
+
   try {
     const [r] = await pool.query(
       `INSERT INTO ads_campaigns
@@ -310,101 +322,188 @@ router.get("/serve", async (req, res) => {
 });
 
 
-// --- Track view/click and charge budget safely ---
-async function chargeIfPossible(conn, campaign, unitCost) {
-  // Stop if budget is already reached
-  if (Number(campaign.campaign_spend) + unitCost > Number(campaign.campaign_budget)) {
-    // pause the campaign
-    await conn.query(
-      `UPDATE ads_campaigns SET campaign_is_active='0' WHERE campaign_id=?`,
-      [campaign.campaign_id]
-    );
-    return false;
-  }
-  await conn.query(
-    `UPDATE ads_campaigns
-     SET campaign_spend = campaign_spend + ?,
-         campaign_views = campaign_views + 0,
-         campaign_clicks = campaign_clicks + 0
-     WHERE campaign_id=?`,
-    [unitCost, campaign.campaign_id]
+async function getOption(name, fallback = null) {
+  const [rows] = await pool.query(
+    "SELECT option_value FROM system_options WHERE option_name=? LIMIT 1",
+    [name]
   );
-  return true;
+  if (!rows.length) return fallback;
+  return rows[0].option_value;
 }
 
-router.post("/:id/track-view", async (req, res) => {
+async function getAdSettings() {
+  const [rows] = await pool.query(
+    "SELECT option_name, option_value FROM system_options WHERE option_name IN ('ads_cost_view','ads_cost_click','ads_author_view_enabled')"
+  );
+  const map = Object.fromEntries(rows.map(r => [r.option_name, r.option_value]));
+  return {
+    ppv: Number(map.ads_cost_view ?? 0),
+    ppc: Number(map.ads_cost_click ?? 0),
+    authorCanSee: (map.ads_author_view_enabled ?? "1") === "1",
+  };
+}
+
+// --- BILLING CORE ---
+// Apply a charge atomically: increase campaign_spend, increment counters, and deduct from owner's wallet.
+// Auto-pauses when budget or wallet is insufficient.
+async function chargeAd({ campaignId, mode, viewerUserId = null }) {
+  const conn = await pool.getConnection();
   try {
-    const cid = Number(req.params.id);
-    const [rows] = await pool.query(`SELECT * FROM ads_campaigns WHERE campaign_id=?`, [cid]);
-    if (!rows.length) return bad(res, "Not found", 404);
-    const c = rows[0];
-    if (c.campaign_is_active !== "1" || c.campaign_is_approved !== "1") return ok(res, { skipped: true });
+    await conn.beginTransaction();
 
-    const conn = await pool.getConnection();
-    try {
-      await conn.beginTransaction();
+    const [[c]] = await conn.query(
+      `SELECT ac.*, u.user_wallet_balance AS wallet
+         FROM ads_campaigns ac
+         JOIN users u ON u.user_id = ac.campaign_user_id
+        WHERE ac.campaign_id = ?
+        FOR UPDATE`,
+      [campaignId]
+    );
 
-      // increment view & spend if bidding='view'
-      await conn.query(
-        `UPDATE ads_campaigns SET campaign_views = campaign_views + 1 WHERE campaign_id=?`,
-        [cid]
-      );
-      if (c.campaign_bidding === "view") {
-        const charged = await chargeIfPossible(conn, c, CPV_NGN);
-        if (!charged) {
-          await conn.commit();
-          return ok(res, { paused: true });
-        }
-      }
-      await conn.commit();
-      ok(res, { tracked: true });
-    } catch (e) {
+    if (!c) {
       await conn.rollback();
-      throw e;
-    } finally {
-      conn.release();
+      return { ok: false, error: "Campaign not found" };
     }
+
+    // Ensure campaign is eligible
+    const nowEligible =
+      c.campaign_is_active === "1" &&
+      c.campaign_is_declined === "0" &&
+      (c.campaign_is_approved === "1" || c.campaign_is_approved === 1) &&
+      new Date() >= new Date(c.campaign_start_date) &&
+      new Date() <= new Date(c.campaign_end_date) &&
+      Number(c.campaign_spend) < Number(c.campaign_budget);
+
+    if (!nowEligible) {
+      await conn.rollback();
+      return { ok: false, error: "Campaign not eligible" };
+    }
+
+    // Settings
+    const { ppv, ppc, authorCanSee } = await getAdSettings();
+
+    const isOwnerView = viewerUserId && Number(viewerUserId) === Number(c.campaign_user_id);
+    if (isOwnerView && !authorCanSee) {
+      // ignore author’s own view/click when disabled
+      await conn.rollback();
+      return { ok: true, ignored: true };
+    }
+
+    // Determine charge and counters
+    const charge = mode === "view" ? ppv : ppc;
+    const willCharge = (mode === "view" && c.campaign_bidding === "view") || (mode === "click" && c.campaign_bidding === "click");
+
+    // Always increment the corresponding counter, but only charge if bidding matches
+    const nextViews  = Number(c.campaign_views  || 0) + (mode === "view"  ? 1 : 0);
+    const nextClicks = Number(c.campaign_clicks || 0) + (mode === "click" ? 1 : 0);
+
+    // If not charging (different bidding), just bump counters
+    if (!willCharge || charge <= 0) {
+      await conn.query(
+        `UPDATE ads_campaigns
+            SET campaign_views=?, campaign_clicks=?
+          WHERE campaign_id=?`,
+        [nextViews, nextClicks, campaignId]
+      );
+      await conn.commit();
+      return { ok: true, charged: 0 };
+    }
+
+    const spend = Number(c.campaign_spend || 0);
+    const budget = Number(c.campaign_budget || 0);
+    const remainingBudget = budget - spend;
+
+    // Budget cap
+    if (charge > remainingBudget) {
+      await conn.query(
+        `UPDATE ads_campaigns
+            SET campaign_is_active='0'
+          WHERE campaign_id=?`,
+        [campaignId]
+      );
+      await conn.commit();
+      return { ok: false, paused: true, error: "Budget reached" };
+    }
+
+    // Wallet cap
+    const wallet = Number(c.wallet || 0);
+    if (wallet < charge) {
+      await conn.query(
+        `UPDATE ads_campaigns
+            SET campaign_is_active='0'
+          WHERE campaign_id=?`,
+        [campaignId]
+      );
+      await conn.commit();
+      return { ok: false, paused: true, error: "Insufficient wallet balance" };
+    }
+
+    // Deduct and update
+    await conn.query(
+      `UPDATE ads_campaigns
+          SET campaign_spend = campaign_spend + ?,
+              campaign_views = ?,
+              campaign_clicks = ?
+        WHERE campaign_id=?`,
+      [charge, nextViews, nextClicks, campaignId]
+    );
+
+    await conn.query(
+      `UPDATE users
+          SET user_wallet_balance = user_wallet_balance - ?
+        WHERE user_id = ?`,
+      [charge, c.campaign_user_id]
+    );
+
+    await conn.commit();
+    return { ok: true, charged: charge };
+  } catch (e) {
+    try { await conn.rollback(); } catch {}
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
+// VIEW tracking
+router.post("/:id/track-view", ensureAuth, async (req, res) => {
+  try {
+    const campaignId =  Number(req.params.id);
+
+    if (!campaignId) return res.status(400).json({ ok: false, error: "campaign_id required" });
+
+    const result = await chargeAd({
+      campaignId,
+      mode: "view",
+      viewerUserId: req.user?.userId ?? null,
+    });
+
+    // If campaign paused due to spend/wallet, still return ok so FE doesn't break
+    if (result.ok) return res.json({ ok: true, charged: result.charged || 0, ignored: !!result.ignored });
+    return res.json({ ok: false, paused: !!result.paused, error: result.error || "View not counted" });
   } catch (e) {
     console.error(e);
-    bad(res, "Failed");
+    res.status(500).json({ ok: false, error: "Failed to track view" });
   }
 });
 
-router.post("/:id/track-click", async (req, res) => {
+// CLICK tracking
+router.post("/:id/track-click", ensureAuth, async (req, res) => {
   try {
-    const cid = Number(req.params.id);
-    const [rows] = await pool.query(`SELECT * FROM ads_campaigns WHERE campaign_id=?`, [cid]);
-    if (!rows.length) return bad(res, "Not found", 404);
-    const c = rows[0];
-    if (c.campaign_is_active !== "1" || c.campaign_is_approved !== "1") return ok(res, { skipped: true });
+    const campaignId = Number(req.params.id);
+    if (!campaignId) return res.status(400).json({ ok: false, error: "campaign_id required" });
 
-    const conn = await pool.getConnection();
-    try {
-      await conn.beginTransaction();
+    const result = await chargeAd({
+      campaignId,
+      mode: "click",
+      viewerUserId: req.user?.userId ?? null,
+    });
 
-      // increment click & spend if bidding='click'
-      await conn.query(
-        `UPDATE ads_campaigns SET campaign_clicks = campaign_clicks + 1 WHERE campaign_id=?`,
-        [cid]
-      );
-      if (c.campaign_bidding === "click") {
-        const charged = await chargeIfPossible(conn, c, CPC_NGN);
-        if (!charged) {
-          await conn.commit();
-          return ok(res, { paused: true });
-        }
-      }
-      await conn.commit();
-      ok(res, { tracked: true });
-    } catch (e) {
-      await conn.rollback();
-      throw e;
-    } finally {
-      conn.release();
-    }
+    if (result.ok) return res.json({ ok: true, charged: result.charged || 0, ignored: !!result.ignored });
+    return res.json({ ok: false, paused: !!result.paused, error: result.error || "Click not counted" });
   } catch (e) {
     console.error(e);
-    bad(res, "Failed");
+    res.status(500).json({ ok: false, error: "Failed to track click" });
   }
 });
 
@@ -438,6 +537,18 @@ router.patch("/campaigns/:id", ensureAuth, async (req, res) => {
     if (row.campaign_user_id !== req.user.userId && !req.user.isAdmin) {
       return res.status(403).json({ ok: false, error: "Forbidden" });
     }
+
+      // 1) Wallet must cover budget at creation time
+      const [[u]] = await pool.query(
+        "SELECT user_wallet_balance FROM users WHERE user_id=?",
+        [req.user.userId]
+      );
+      if (!u) {
+        return res.status(404).json({ ok: false, error: "User not found" });
+      }
+      if (Number(u.user_wallet_balance || 0) < req.body.campaign_budget) {
+        return res.status(400).json({ ok: false, error: "Insufficient wallet balance for selected budget" });
+      }
 
     // sanitize payload
     const b = parseCampaignBody(req.body, row.campaign_user_id);
