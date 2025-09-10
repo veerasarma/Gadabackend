@@ -5,6 +5,7 @@ const { ensureAuth } = require('../middlewares/auth');
 const { createNotification } = require('../services/notificationService');
 const { checkActivePackage } = require("../services/packageService");
 const { creditPoints } = require('../utils/points');
+const path = require('path');
 
 const router = express.Router();
 
@@ -1441,6 +1442,88 @@ router.delete('/:id/boost', ensureAuth, async (req, res) => {
     await conn.rollback();
     console.error('[DELETE /posts/:id/boost]', e);
     res.status(500).json({ error: 'Failed to unboost post' });
+  } finally {
+    conn.release();
+  }
+});
+
+function int(v) { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 0; }
+async function safeExec(conn, sql, params = []) {
+  try { await conn.query(sql, params); } catch (e) {
+    if (e?.code !== 'ER_NO_SUCH_TABLE') throw e;
+  }
+}
+function uploadsPath(rel) {
+  if (!rel) return null;
+  const clean = String(rel).replace(/^\/?uploads\//, '');
+  const full = path.resolve(process.cwd(), 'uploads', clean);
+  const root = path.resolve(process.cwd(), 'uploads');
+  return full.startsWith(root) ? full : null;
+}
+
+// DELETE /api/posts/:id
+router.delete('/:id', ensureAuth, async (req, res) => {
+  const postId = int(req.params.id);
+  const userId = int(req.user.userId);
+  if (!postId) return res.status(400).json({ ok: false, error: 'Invalid id' });
+
+  const conn = await pool.promise().getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // 1) Lock & verify owner
+    const [[row]] = await conn.query(
+      `SELECT p.post_id, p.user_id FROM posts p WHERE p.post_id=? FOR UPDATE`,
+      [postId]
+    );
+    if (!row) { await conn.rollback(); return res.status(404).json({ ok:false, error:'Not found' }); }
+    if (int(row.user_id) !== userId) { await conn.rollback(); return res.status(403).json({ ok:false, error:'Forbidden' }); }
+
+    // 2) Gather files to delete (photos/videos/media tables)
+    const files = [];
+
+    const [photoRows] = await conn.query(`SELECT source FROM posts_photos WHERE post_id=?`, [postId]);
+    for (const r of photoRows) if (r?.source) files.push(r.source);
+
+    const [videoRows] = await conn.query(`SELECT source FROM posts_videos WHERE post_id=?`, [postId]);
+    for (const r of videoRows) if (r?.source) files.push(r.source);
+
+    const [mediaRows] = await conn.query(`SELECT source_url FROM posts_media WHERE post_id=?`, [postId]);
+    for (const r of mediaRows) if (r?.source_url && !/^https?:\/\//i.test(r.source_url)) files.push(r.source_url);
+
+    // (optional) live thumbnail
+    try {
+      const [[live]] = await conn.query(`SELECT video_thumbnail FROM posts_live WHERE post_id=?`, [postId]);
+      if (live?.video_thumbnail) files.push(live.video_thumbnail);
+    } catch (_) {}
+
+    // 3) Delete child rows (ignore if table absent)
+    await safeExec(conn, `DELETE FROM posts_reactions WHERE post_id=?`, [postId]);
+    await safeExec(conn, `DELETE FROM posts_comments WHERE node_type='post' AND node_id=?`, [postId]);
+    await safeExec(conn, `DELETE FROM posts_views WHERE post_id=?`, [postId]);
+    await safeExec(conn, `DELETE FROM posts_media WHERE post_id=?`, [postId]);
+    await safeExec(conn, `DELETE FROM posts_photos WHERE post_id=?`, [postId]);
+    await safeExec(conn, `DELETE FROM posts_videos WHERE post_id=?`, [postId]);
+    await safeExec(conn, `DELETE FROM posts_shares WHERE post_id=?`, [postId]);
+    await safeExec(conn, `DELETE FROM posts_live WHERE post_id=?`, [postId]);
+
+    // 4) Delete the post
+    await conn.query(`DELETE FROM posts WHERE post_id=?`, [postId]);
+
+    await conn.commit();
+
+    // 5) Remove files from disk (best-effort)
+    for (const rel of files) {
+      const full = uploadsPath(rel);
+      if (!full) continue;
+      try { await fs.unlink(full); } catch (_) {}
+    }
+
+    return res.json({ ok: true });
+  } catch (e) {
+    try { await conn.rollback(); } catch {}
+    console.error('delete post error:', e);
+    return res.status(500).json({ ok:false, error:'Failed to delete post' });
   } finally {
     conn.release();
   }
