@@ -25,6 +25,7 @@ function initSocket(httpServer) {
 
   io.on('connection', (socket) => {
     const userId = socket.user.id;
+   
     socket.join(`user:${userId}`);
 
        // ----- CALL SIGNALING (audio/video) -----

@@ -8,6 +8,8 @@ const path = require('path');
 const crypto = require('crypto');
 const router = express.Router();
 const { RtcTokenBuilder, RtcRole } = require('agora-access-token'); //
+const { fanOutLiveStart } = require('../utils/liveFanout');
+const { getIO } = require('../socket');
 
 // Adjust these requires to match your project structure
 const pool = require('../config/db');                 // mysql2 pool (promise or callback API)
@@ -259,7 +261,8 @@ async function generateDefaultLiveThumb({ postId, channelName }) {
 // ---------------------- START LIVE ----------------------
 router.post('/start', ensureAuth, async (req, res) => {
   const userId = Number(req.user?.userId || 0);
-  const { postId, channelName, agoraUid, thumbnailDataUrl } = req.body || {};
+  const { postId, channelName, agoraUid, thumbnailDataUrl,title = '🔴 Live now' } = req.body || {};
+  const io = getIO();
 
   if (!postId || !channelName || !agoraUid) {
     return res.status(400).json({ ok: false, error: 'Missing postId/channelName/agoraUid' });
@@ -301,6 +304,9 @@ router.post('/start', ensureAuth, async (req, res) => {
           WHERE live_id = ?`,
         [agoraUid, channelName, thumbPath || '', liveId]
       );
+       
+    fanOutLiveStart({ pool, io, broadcasterId: userId, postId,liveId, title })
+      .catch(err => console.error('fanOutLiveStart error', err));
       return res.json({ ok: true, live: { liveId, postId, channelName, agoraUid, video_thumbnail: thumbPath || '' } });
     }
 
@@ -310,6 +316,11 @@ router.post('/start', ensureAuth, async (req, res) => {
        VALUES (?, ?, ?, ?, '0', '0')`,
       [postId, thumbPath || '', agoraUid, channelName]
     );
+ 
+    
+    fanOutLiveStart({ pool, io, broadcasterId: userId, postId,liveId: ins.insertId, title })
+      .catch(err => console.error('fanOutLiveStart error', err));
+
 
     return res.json({
       ok: true,
