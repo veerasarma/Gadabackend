@@ -95,8 +95,8 @@ app.use(
 
 app.use("/api/media", mediaRoutes);
 // Body parsers (after static)
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ limit: "10mb", extended: true }));
+app.use(express.json({ limit: "200mb" }));
+app.use(express.urlencoded({ limit: "200mb", extended: true }));
 
 // Rate limiter (after static so assets aren't rate-limited)
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
