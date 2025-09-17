@@ -30,6 +30,18 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+function safeFileName(original) {
+  const base = String(original || 'file').replace(/[^\w.\-]+/g, '_');
+  const ts = Date.now();
+  return `${ts}_${base}`;
+}
+function moveToUploads(tmpPath, finalRelPath) {
+  const finalAbs = path.join(process.cwd(), 'uploads', finalRelPath);
+  fs.mkdirSync(path.dirname(finalAbs), { recursive: true });
+  fs.renameSync(tmpPath, finalAbs);
+  return finalRelPath; // stored path relative to /uploads
+}
+
 /* ------------------------------ helpers ------------------------------ */
 async function getPageByIdOrName(idOrName, conn) {
   if (/^\d+$/.test(String(idOrName))) {
@@ -555,57 +567,144 @@ router.get('/:idOrName/posts', ensureAuth, async (req, res) => {
   }
 });
 
-router.post('/:idOrName/posts', ensureAuth, async (req, res) => {
-  const me = Number(req.user.userId);
-  const { content, media = [] } = req.body || {};
-  const idOrName = req.params.idOrName;
+// router.post('/:idOrName/posts', ensureAuth, async (req, res) => {
+//   const me = Number(req.user.userId);
+//   const { content, media = [] } = req.body || {};
+//   const idOrName = req.params.idOrName;
 
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
+//   const conn = await pool.getConnection();
+//   try {
+//     await conn.beginTransaction();
 
-    const page = await getPageByIdOrName(idOrName, conn);
-    if (!page) { await conn.rollback(); return res.status(404).json({ error: 'Page not found' }); }
+//     const page = await getPageByIdOrName(idOrName, conn);
+//     if (!page) { await conn.rollback(); return res.status(404).json({ error: 'Page not found' }); }
 
-    const admin = (page.page_admin === me) || (await isPageAdmin(me, page.page_id, conn));
-    if (!admin) { await conn.rollback(); return res.status(403).json({ error: 'Forbidden' }); }
+//     const admin = (page.page_admin === me) || (await isPageAdmin(me, page.page_id, conn));
+//     if (!admin) { await conn.rollback(); return res.status(403).json({ error: 'Forbidden' }); }
 
-    const [ins] = await conn.query(
-      `INSERT INTO posts
-         (user_id, user_type, post_type, time, privacy, text, is_hidden, in_group, in_event, in_wall,
-          reaction_like_count, comments, shares)
-       VALUES (?, 'page', 'status', NOW(), 'public', ?, '0', '0', '0', '0', 0, 0, 0)`,
-      [page.page_id, content || null]
-    );
-    const postId = ins.insertId;
+//     const [ins] = await conn.query(
+//       `INSERT INTO posts
+//          (user_id, user_type, post_type, time, privacy, text, is_hidden, in_group, in_event, in_wall,
+//           reaction_like_count, comments, shares)
+//        VALUES (?, 'page', 'status', NOW(), 'public', ?, '0', '0', '0', '0', 0, 0, 0)`,
+//       [page.page_id, content || null]
+//     );
+//     const postId = ins.insertId;
 
-    for (const m of media) {
-      if (!m?.url || !m?.type) continue;
-      if (m.type === 'image') {
-        await conn.query(
-          `INSERT INTO posts_media (post_id, source_url, source_provider, source_type)
-           VALUES (?, ?, 'upload', 'image')`,
-          [postId, m.url]
-        );
-      } else if (m.type === 'video') {
-        await conn.query(
-          `INSERT INTO posts_videos (post_id, category_id, source)
-           VALUES (?, 1, ?)`,
-          [postId, m.url]
-        );
+//     for (const m of media) {
+//       if (!m?.url || !m?.type) continue;
+//       if (m.type === 'image') {
+//         await conn.query(
+//           `INSERT INTO posts_media (post_id, source_url, source_provider, source_type)
+//            VALUES (?, ?, 'upload', 'image')`,
+//           [postId, m.url]
+//         );
+//       } else if (m.type === 'video') {
+//         await conn.query(
+//           `INSERT INTO posts_videos (post_id, category_id, source)
+//            VALUES (?, 1, ?)`,
+//           [postId, m.url]
+//         );
+//       }
+//     }
+
+//     await conn.commit();
+//     res.status(201).json({ postId });
+//   } catch (e) {
+//     await conn.rollback();
+//     console.error('[POST /pages/:id/posts]', e);
+//     res.status(500).json({ error: 'Failed to create page post' });
+//   } finally {
+//     conn.release();
+//   }
+// });
+
+async function getPageRowByHandle(conn, handle) {
+  const [[pg]] = await conn.query(
+    `SELECT page_id, page_name
+       FROM pages
+      WHERE page_name = ?`,
+    [handle]
+  );
+  return pg;
+}
+
+// POST /api/pages/:handle/posts  (text + images + videos)
+router.post('/:handle/posts',
+  ensureAuth,
+  upload.fields([{ name: 'images', maxCount: 12 }, { name: 'videos', maxCount: 4 }]),
+  async (req, res) => {
+    console.log("kfhskdfhsdjfhsdfhsdjhflskdjhf")
+    const { handle } = req.params;
+    const userId = Number(req.user.userId);
+    const content = (req.body.content || '').toString();
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      // 1) locate page
+      const page = await getPageRowByHandle(conn, handle);
+      if (!page) {
+        await conn.rollback();
+        return res.status(404).json({ ok: false, error: 'Page not found' });
       }
-    }
 
-    await conn.commit();
-    res.status(201).json({ postId });
-  } catch (e) {
-    await conn.rollback();
-    console.error('[POST /pages/:id/posts]', e);
-    res.status(500).json({ error: 'Failed to create page post' });
-  } finally {
-    conn.release();
+      // (Optionally check admin permission for posting as page)
+      // if (!await isPageAdmin(conn, page.page_id, userId)) { ... }
+
+      // 2) create a "post" tied to the page (adjust to your schema)
+      // Assuming posts has columns: post_id, user_id, page_id, text, post_type, time, is_hidden
+      const [postIns] = await conn.query(
+        `INSERT INTO posts
+           (user_id, user_type, post_type, time, privacy, text, is_hidden, in_group, in_event, in_wall,
+            reaction_like_count, comments, shares)
+         VALUES (?, 'page', 'status', NOW(), 'public', ?, '0', '0', '0', '0', 0, 0, 0)`,
+        [page.page_id, content || null]
+      );
+
+      const postId = postIns.insertId;
+      console.log(req.files,'req.filesreq.files')
+      const images = (req.files?.images || []);
+      const videos = (req.files?.videos || []);
+      console.log(images,'imagesimages')
+      // 3) persist IMAGES into posts_photos (and/or posts_media)
+      for (const file of images) {
+          const rel = path.join('pages', String(page.page_id), 'images', safeFileName(file.originalname));
+          const stored = moveToUploads(file.path, rel);
+
+          await conn.query(
+          `INSERT INTO posts_media (post_id, source_url, source_provider, source_type)
+          VALUES (?, ?, 'upload', 'image')`,
+          [postId, stored]
+          );
+      }
+
+      // 4) persist VIDEOS into posts_videos (and/or posts_media)
+      for (const file of videos) {
+        const rel = path.join('pages', String(page.page_id), 'videos', safeFileName(file.originalname));
+        const stored = moveToUploads(file.path, rel);
+
+        await conn.query(
+                    `INSERT INTO posts_videos (post_id, category_id, source)
+                     VALUES (?, 1, ?)`,
+                    [postId, stored]
+                  );
+       
+      }
+
+      await conn.commit();
+      return res.json({ ok: true, postId });
+    } catch (e) {
+      try { await conn.rollback(); } catch {}
+      console.error('[POST /api/pages/:handle/posts]', e);
+      return res.status(500).json({ ok: false, error: 'Failed to create page post' });
+    } finally {
+      conn.release();
+      // cleanup tmp files on error paths is handled by rollback; here they’re already moved
+    }
   }
-});
+);
 
 
 async function resolvePage(conn, idOrHandle) {

@@ -68,32 +68,45 @@ const upload = multer({
   }
 });
 // 4) route with error handling
-router.post('/upload', ensureAuth,(req, res) => {
-  upload.array('files', 5)(req, res, err => {
-    if (err instanceof multer.MulterError) {
-      // Multer-specific errors
-      return res.status(400).json({ error: err.message });
-    } else if (err) {
-      // Unknown errors
-      return res.status(500).json({ error: err.message });
-    }
-    // if (!req.files || !req.files.length) {
-    //   return res.status(400).json({ error: 'No files received' });
-    // }
+router.post('/upload', ensureAuth, (req, res) => {
+  try {
+    // invoke multer for this route
+    upload.array('files', 5)(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        console.error('Multer error:', err);
+        return res.status(400).json({ error: err.message });
+      } else if (err) {
+        console.error('Unknown upload error:', err);
+        return res.status(500).json({ error: 'Upload failed' });
+      }
 
-    const files = Array.isArray(req.files) ? req.files : [];
-    if (!files.length) {
-      return res.status(400).json({ error: 'No files received by Multer' });
-    }
+      try {
+        const files = Array.isArray(req.files) ? req.files : [];
+        if (!files.length) {
+          return res.status(400).json({ error: 'No files received by Multer' });
+        }
 
-    // build URLs
-    const urls = files.map(f => {
-      const rel = path.relative(process.cwd(), f.path).replace(/\\/g, '/');
-      return `/${rel}`;
+        // build URLs safely (works when using diskStorage with f.path)
+        const urls = files.map((f) => {
+          if (!f.path) {
+            // If using memoryStorage, you won't have f.path; adjust to your setup.
+            // e.g., return `/uploads/${f.filename}`;
+            throw new Error('Uploaded file has no path (check storage engine).');
+          }
+          const rel = path.relative(process.cwd(), f.path).replace(/\\/g, '/');
+          return rel.startsWith('/') ? rel : `/${rel}`;
+        });
+
+        return res.json({ urls });
+      } catch (handlerErr) {
+        console.error('Post-upload processing error:', handlerErr);
+        return res.status(500).json({ error: 'Failed to process uploaded files' });
+      }
     });
-
-    res.json({ urls });
-  });
+  } catch (outerErr) {
+    console.error('Unexpected upload route error:', outerErr);
+    return res.status(500).json({ error: 'Unexpected server error' });
+  }
 });
 
 module.exports = router;

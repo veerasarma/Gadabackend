@@ -168,6 +168,62 @@ router.get('/list', ensureAuth, async (req, res) => {
   }
 });
 
+async function countFriends(conn, userId) {
+  const uid = Number(userId);
+console.log(uid,'uiduiduid')
+  // We UNION the two schemas (if one doesn’t exist, that subquery just errors — we catch & ignore)
+  // Safer way: attempt queries independently, then sum distinct ids in JS.
+
+
+  // Schema A: users_friends(user_id, friend_id, status)
+  try {
+    const [rows] = await conn.query(
+      `
+      SELECT
+        CASE
+          WHEN fr.user_one_id = ? THEN fr.user_two_id
+          ELSE fr.user_one_id
+        END AS friend_id
+        
+      FROM friends fr
+      
+      WHERE (fr.user_one_id = ? OR fr.user_two_id = ?)
+        AND fr.status = 1
+      
+      `,
+      [uid, uid, uid, uid]
+    );
+    return rows.length;
+    // rows?.forEach(r => ids.add(Number(r.fid)));
+  } catch (e) {
+    console.log(e,'ee')
+    // table may not exist in some envs
+  }
+
+  // // remove self just in case
+  // ids.delete(uid);
+
+
+}
+
+// GET /api/friends/count
+router.get('/count', ensureAuth, async (req, res) => {
+  console.log("kjfhksdjhfksdjf")
+  const userId = Number(req.user?.userId || 0);
+  if (!userId) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+
+  const conn = await pool.getConnection();
+  try {
+    const count = await countFriends(conn, userId);
+    return res.json({ ok: true, count });
+  } catch (e) {
+    console.error('[GET /friends/count]', e);
+    return res.status(500).json({ ok: false, error: 'Failed to fetch count' });
+  } finally {
+    conn.release();
+  }
+});
+
 /**
  * GET /api/friends/suggestions
  * Suggest users:
@@ -176,53 +232,7 @@ router.get('/list', ensureAuth, async (req, res) => {
  *  - no accepted friendship with me
  *  - no pending request in either direction
  */
-// router.get('/suggestions', ensureAuth, async (req, res) => {
-//   try {
-//     const me = Number(req.user.userId);
-//     const [rows] = await pool.query(
-//       `
-//       SELECT 
-//         u.user_id,
-//         u.user_name,
-//         COALESCE(u.user_picture, u.user_picture) AS profileImage
-//       FROM users u
-//       WHERE u.user_id <> ?
-//         AND COALESCE(u.user_approved, '1') = '1'  -- drop/adjust if you don’t use this flag
 
-//         -- no accepted friendship either direction
-//         AND NOT EXISTS (
-//           SELECT 1 FROM friends fr
-//            WHERE ((fr.user_one_id = u.user_id AND fr.user_two_id = ?)
-//                OR (fr.user_one_id = ?        AND fr.user_two_id = u.user_id))
-//              AND fr.status = 'accepted'
-//         )
-
-//         -- no pending request either direction
-//         AND NOT EXISTS (
-//           SELECT 1 FROM friends fr
-//            WHERE ((fr.user_one_id = u.user_id AND fr.user_two_id = ?)
-//                OR (fr.user_one_id = ?        AND fr.user_two_id = u.user_id))
-//              AND fr.status = 'pending'
-//         )
-
-//       ORDER BY u.user_name
-//       LIMIT 10
-//       `,
-//       [me, me, me, me, me]
-//     );
-
-//     res.json(
-//       rows.map(r => ({
-//         user_id: String(r.user_id),
-//         user_name: r.user_name,
-//         profileImage: r.profileImage || null,
-//       }))
-//     );
-//   } catch (e) {
-//     console.error('[GET /friends/suggestions]', e);
-//     res.status(500).json({ error: 'Failed to load suggestions' });
-//   }
-// });
 
 router.get('/suggestions', ensureAuth, async (req, res) => {
   const viewer = Number(req.user.userId);
