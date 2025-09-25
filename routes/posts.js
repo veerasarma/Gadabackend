@@ -16,7 +16,9 @@ function mapPostRow(p) {
     author: {
       id: String(p.user_id),
       username: p.authorUsername,
-      profileImage: p.authorProfileImage || null
+      profileImage: p.authorProfileImage || null,
+      user_subscribed: p.user_subscribed || '0',
+      user_package: p.user_package || null,
     },
     content: p.text || '',
     createdAt: p.time,
@@ -131,7 +133,7 @@ router.get('/', ensureAuth, async (req, res) => {
         p.boosted, p.boosted_at,
         p.post_type,
         IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
-        u.user_picture AS authorProfileImage
+        u.user_picture AS authorProfileImage, user_subscribed, user_package
       FROM posts p
       JOIN users u ON u.user_id = p.user_id
       WHERE p.is_hidden = '0'
@@ -154,7 +156,7 @@ router.get('/', ensureAuth, async (req, res) => {
         p.boosted, p.boosted_at,
         p.post_type,
         IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
-        u.user_picture AS authorProfileImage,
+        u.user_picture AS authorProfileImage, user_subscribed,user_package,
 
         TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
         (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
