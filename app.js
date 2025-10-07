@@ -99,7 +99,7 @@ app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ limit: "200mb", extended: true }));
 
 // Rate limiter (after static so assets aren't rate-limited)
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
+const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 app.use(limiter);
 
 // System init
