@@ -9,6 +9,10 @@ const db = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   namedPlaceholders: true,
+  queueLimit: 0,            // 0 = unlimited queue
+  enableKeepAlive: true,    // mysql2 option
+  keepAliveInitialDelay: 0,
+
 });
 
 module.exports = db;
