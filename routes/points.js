@@ -67,13 +67,83 @@ router.get('/testing', async (req, res, next)=> {
  * GET /api/points/overview
  * Returns points rules (from system config), current balances and remaining daily points.
  */
+// router.get('/overview', ensureAuth, async (req, res) => {
+//   const userId = req.user.userId;
+//   console.log(userId,'userId')
+//   const conn = await pool.getConnection();
+//   const sys = (req.system) || {};
+//   try {
+//     // balances
+//     const [urows] = await conn.query(
+//       `SELECT user_points, user_wallet_balance
+//          FROM users
+//         WHERE user_id = ?
+//         LIMIT 1`,
+//       [userId]
+//     );
+//     if (!urows.length) return res.status(404).json({ error: 'User not found' });
+
+//     // settings
+//     const enabledRaw = await getOption(conn, 'points_money_transfer_enabled');
+//     const pointsPerCurrencyRaw = await getOption(conn, 'points_per_currency');
+
+//     const enabled = String(enabledRaw ?? '0').trim() === '1' || /^true$/i.test(String(enabledRaw));
+//     const pointsPerCurrency = Number(pointsPerCurrencyRaw) > 0 ? Number(pointsPerCurrencyRaw) : 10; // default safeguard
+
+//     // ---- daily remaining: sum points earned in last X hours (default 24) ----
+//     const windowHrs = Number(sys.POINTS_RESET_WINDOW_HOURS ?? 24);
+//     const [sumRows] = await pool.query(
+//       `SELECT COALESCE(SUM(points),0) AS earned
+//          FROM log_points
+//         WHERE user_id = ?
+//           AND time >= (NOW() - INTERVAL ? HOUR)`,
+//       [userId, windowHrs]
+//     );
+
+//     const result = await checkActivePackage(userId);
+//     console.log(result,userId)
+//     let daily_limit = (result.active)?sys.points_limit_pro:sys.points_limit_user ?? 1000
+
+//     const earned = Number(sumRows[0].earned || 0);
+//     const remainingToday = Math.max(0, daily_limit - earned);
+
+//     // shape matches what your PointsPage already expects (see conversion usage)
+//     return res.json({
+//       balances: {
+//         points: Number(urows[0].user_points) || 0,
+//         money: Number(urows[0].user_wallet_balance) || 0,
+//       },
+//       rules: {
+//         conversion: {
+//           // your UI shows: "Each X points equal ₦1"
+//           pointsPerNaira: pointsPerCurrency,
+//           enabled,
+//         },
+//         // keep room for other rules your UI shows (post_create, etc.) if you already return them
+//         post_create: Number(sys.points_per_post ?? 10),
+//       post_view: Number(sys.points_per_post_view ?? 1),
+//       post_comment: Number(sys.points_per_post_comment ?? 5),
+//       follow: Number(sys.points_per_follow ?? 5),
+//       refer: Number(sys.points_per_referred ?? 5),
+//       daily_limit: Number(daily_limit ?? 1000),
+//       },
+//       remainingToday: remainingToday,
+//       windowHours: 24,
+//     });
+//   } catch (e) {
+//     console.error('[points/overview]', e);
+//     res.status(500).json({ error: 'Failed to load overview' });
+//   } finally {
+//     conn.release();
+//   }
+// });
+
 router.get('/overview', ensureAuth, async (req, res) => {
   const userId = req.user.userId;
-  console.log(userId,'userId')
   const conn = await pool.getConnection();
-  const sys = (req.system) || {};
+  const sys = req.system || {};
   try {
-    // balances
+    // 1) fetch user balances (must know user exists)
     const [urows] = await conn.query(
       `SELECT user_points, user_wallet_balance
          FROM users
@@ -83,31 +153,71 @@ router.get('/overview', ensureAuth, async (req, res) => {
     );
     if (!urows.length) return res.status(404).json({ error: 'User not found' });
 
-    // settings
-    const enabledRaw = await getOption(conn, 'points_money_transfer_enabled');
-    const pointsPerCurrencyRaw = await getOption(conn, 'points_per_currency');
-
-    const enabled = String(enabledRaw ?? '0').trim() === '1' || /^true$/i.test(String(enabledRaw));
-    const pointsPerCurrency = Number(pointsPerCurrencyRaw) > 0 ? Number(pointsPerCurrencyRaw) : 10; // default safeguard
-
-    // ---- daily remaining: sum points earned in last X hours (default 24) ----
+    // 2) prepare values used by other queries
     const windowHrs = Number(sys.POINTS_RESET_WINDOW_HOURS ?? 24);
-    const [sumRows] = await pool.query(
-      `SELECT COALESCE(SUM(points),0) AS earned
-         FROM log_points
-        WHERE user_id = ?
-          AND time >= (NOW() - INTERVAL ? HOUR)`,
-      [userId, windowHrs]
+    const sinceDate = new Date(Date.now() - windowHrs * 3600 * 1000); // JS timestamp, use in query
+
+    // 3) start independent DB reads in parallel:
+    //    - get options (batch)
+    //    - sum points in log_points for the window
+    //    - checkActivePackage (keeps same behavior)
+    const optionNames = [
+      'points_money_transfer_enabled',
+      'points_per_currency',
+      // you can add more option keys here if you later store other rules in options table
+    ];
+
+    const optionsPromise = conn.query(
+      `SELECT option_name, option_value
+         FROM options
+        WHERE option_name IN (?)
+      `,
+      [optionNames]
     );
 
-    const result = await checkActivePackage(userId);
-    console.log(result,userId)
-    let daily_limit = (result.active)?sys.points_limit_pro:sys.points_limit_user ?? 1000
+    const sumPromise = conn.query(
+      `SELECT COALESCE(SUM(points), 0) AS earned
+         FROM log_points
+        WHERE user_id = ?
+          AND time >= ?`,
+      [userId, sinceDate]
+    );
+
+    // if checkActivePackage uses the DB pool, it will execute independently — that's fine
+    const packagePromise = checkActivePackage(userId);
+
+    const [[optRows], [sumRows], packageResult] = await Promise.all([
+      optionsPromise,
+      sumPromise,
+      packagePromise,
+    ]);
+
+    // 4) parse options (batch result)
+    const opts = {};
+    for (const row of optRows) {
+      opts[row.option_name] = row.option_value;
+    }
+    const enabledRaw = opts['points_money_transfer_enabled'];
+    const pointsPerCurrencyRaw = opts['points_per_currency'];
+
+    const enabled =
+      String(enabledRaw ?? '0').trim() === '1' ||
+      /^true$/i.test(String(enabledRaw));
+
+    const pointsPerCurrency =
+      Number(pointsPerCurrencyRaw) > 0 ? Number(pointsPerCurrencyRaw) : 10;
+
+    // 5) compute daily limit based on active package
+    const result = packageResult;
+    const daily_limit =
+      Number(result?.active ? sys.points_limit_pro : sys.points_limit_user) ||
+      Number(sys.points_limit_user ?? 1000) ||
+      1000;
 
     const earned = Number(sumRows[0].earned || 0);
     const remainingToday = Math.max(0, daily_limit - earned);
 
-    // shape matches what your PointsPage already expects (see conversion usage)
+    // 6) respond with exact same shape as before
     return res.json({
       balances: {
         points: Number(urows[0].user_points) || 0,
@@ -115,28 +225,27 @@ router.get('/overview', ensureAuth, async (req, res) => {
       },
       rules: {
         conversion: {
-          // your UI shows: "Each X points equal ₦1"
           pointsPerNaira: pointsPerCurrency,
           enabled,
         },
-        // keep room for other rules your UI shows (post_create, etc.) if you already return them
         post_create: Number(sys.points_per_post ?? 10),
-      post_view: Number(sys.points_per_post_view ?? 1),
-      post_comment: Number(sys.points_per_post_comment ?? 5),
-      follow: Number(sys.points_per_follow ?? 5),
-      refer: Number(sys.points_per_referred ?? 5),
-      daily_limit: Number(daily_limit ?? 1000),
+        post_view: Number(sys.points_per_post_view ?? 1),
+        post_comment: Number(sys.points_per_post_comment ?? 5),
+        follow: Number(sys.points_per_follow ?? 5),
+        refer: Number(sys.points_per_referred ?? 5),
+        daily_limit: Number(daily_limit ?? 1000),
       },
-      remainingToday: remainingToday,
-      windowHours: 24,
+      remainingToday,
+      windowHours: windowHrs,
     });
   } catch (e) {
     console.error('[points/overview]', e);
-    res.status(500).json({ error: 'Failed to load overview' });
+    return res.status(500).json({ error: 'Failed to load overview' });
   } finally {
     conn.release();
   }
 });
+
 
 /**
  * GET /api/points/logs?page=1&limit=10&q=&sort=time&dir=desc
