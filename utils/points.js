@@ -68,14 +68,15 @@ async function creditPoints({
     }
     
       // Current earned in window
-      const [sumRows] = await conn.query(
-        `SELECT COALESCE(SUM(points),0) AS earned
-           FROM log_points
-          WHERE user_id = ?
-            AND time >= (NOW() - INTERVAL ? HOUR)`,
-        [userId, windowHrs]
-      );
-      const earned = Number(sumRows[0]?.earned || 0);
+      // const [sumRows] = await conn.query(
+      //   `SELECT COALESCE(SUM(points),0) AS earned
+      //      FROM log_points
+      //     WHERE user_id = ?
+      //       AND time >= (NOW() - INTERVAL ? HOUR)`,
+      //   [userId, windowHrs]
+      // );
+      // const earned = Number(sumRows[0]?.earned || 0);
+      const earned = 0;
       const remainingToday = Math.max(0, dailyLimit - earned);
   
       if (remainingToday <= 0) {
