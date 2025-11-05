@@ -175,8 +175,8 @@ router.get('/overview', ensureAuth, async (req, res) => {
 
     const packagePromise = checkActivePackage(userId);
 
-    const [[enabledRaw, pointsPerCurrencyRaw], packageResult] =
-      await Promise.all([optsPromise,  packagePromise]);
+    const [[enabledRaw, pointsPerCurrencyRaw], [sumRows], packageResult] =
+      await Promise.all([optsPromise, sumPromise, packagePromise]);
 
     // 4) parse and sanitize option values (same semantics as your original)
     const enabled =
@@ -194,7 +194,6 @@ router.get('/overview', ensureAuth, async (req, res) => {
 
     // 6) remaining calculation
     const earned = Number(sumRows[0].earned || 0);
-    // const earned = 0;
     const remainingToday = Math.max(0, daily_limit - earned);
 
     // 7) return same JSON shape (windowHours now reflects configured window)
