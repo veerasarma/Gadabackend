@@ -67,16 +67,23 @@ async function creditPoints({
         }
     }
     
-      // Current earned in window
-      // const [sumRows] = await conn.query(
-      //   `SELECT COALESCE(SUM(points),0) AS earned
-      //      FROM log_points
-      //     WHERE user_id = ?
-      //       AND time >= (NOW() - INTERVAL ? HOUR)`,
-      //   [userId, windowHrs]
-      // );
-      // const earned = Number(sumRows[0]?.earned || 0);
-      const earned = 0;
+    const windowHrs = Number(sys.POINTS_RESET_WINDOW_HOURS ?? 24);
+const sinceDate = new Date(Date.now() - windowHrs * 3600 * 1000);
+
+// index-friendly sum (pass timestamp, not INTERVAL)
+const sumSql = `
+  SELECT COALESCE(SUM(points),0) AS earned
+    FROM log_points
+   WHERE user_id = ?
+     AND time >= ?
+`;
+
+// optional: force index if you added idx_logpoints_user_time_points
+// const sumSql = `... FROM log_points FORCE INDEX (idx_logpoints_user_time_points) WHERE ...`;
+
+const [sumRows] = await conn.query(sumSql, [userId, sinceDate]);
+const earned = Number(sumRows[0]?.earned || 0);
+      // const earned = 0;
       const remainingToday = Math.max(0, dailyLimit - earned);
   
       if (remainingToday <= 0) {
