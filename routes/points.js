@@ -167,16 +167,16 @@ router.get('/overview', ensureAuth, async (req, res) => {
       getOption(conn, 'points_per_currency').catch(() => null),
     ]);
 
-    const sumSql = `SELECT COALESCE(SUM(points),0) AS earned
-                      FROM log_points
-                     WHERE user_id = ?
-                       AND time >= ?`;
-    const sumPromise = conn.query(sumSql, [userId, sinceDate]);
+    // const sumSql = `SELECT COALESCE(SUM(points),0) AS earned
+    //                   FROM log_points
+    //                  WHERE user_id = ?
+    //                    AND time >= ?`;
+    // const sumPromise = conn.query(sumSql, [userId, sinceDate]);
 
     const packagePromise = checkActivePackage(userId);
 
-    const [[enabledRaw, pointsPerCurrencyRaw], [sumRows], packageResult] =
-      await Promise.all([optsPromise, sumPromise, packagePromise]);
+    const [[enabledRaw, pointsPerCurrencyRaw], packageResult] =
+      await Promise.all([optsPromise,  packagePromise]);
 
     // 4) parse and sanitize option values (same semantics as your original)
     const enabled =
@@ -193,7 +193,8 @@ router.get('/overview', ensureAuth, async (req, res) => {
     const daily_limit = pkgActive ? (dailyLimitPro || 1000) : (dailyLimitFromSys || 1000);
 
     // 6) remaining calculation
-    const earned = Number(sumRows[0].earned || 0);
+    // const earned = Number(sumRows[0].earned || 0);
+    const earned = 0;
     const remainingToday = Math.max(0, daily_limit - earned);
 
     // 7) return same JSON shape (windowHours now reflects configured window)
