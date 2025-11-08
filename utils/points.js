@@ -291,7 +291,7 @@ async function creditPoints({
   }
 
   const sys = (systemConfig || (req && req.system)) || {};
-  const windowHrs = Number(sys.POINTS_RESET_WINDOW_HOURS ?? 24);
+  const windowHrs = Number(24);
 
   // Normalize type + map to config keys
   const norm = String(type).toLowerCase();
