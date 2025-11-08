@@ -342,6 +342,8 @@ async function creditPoints({
 
     // === Redis-backed read for earned in the window ===
     const { earned } = await getEarnedLastWindowFromRedisOrDb(conn, userId, windowHrs);
+    console.log(dailyLimit,'dailyLimit');
+    console.log(earned,'earned');
     const remainingToday = Math.max(0, dailyLimit - earned);
 
     if (remainingToday <= 0) {
