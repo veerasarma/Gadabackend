@@ -4,6 +4,7 @@ const router = express.Router();
 const pool = require('../config/db');              // mysql2/promise pool
 const { ensureAuth } = require('../middlewares/auth'); // your existing auth
 const { checkActivePackage } = require("../services/packageService");
+const { getEarnedLastWindowFromRedisOrDb } = require('../utils/points');
 
 
 /** Helpers */
@@ -193,7 +194,8 @@ router.get('/overview', ensureAuth, async (req, res) => {
     const daily_limit = pkgActive ? (dailyLimitPro || 1000) : (dailyLimitFromSys || 1000);
 
     // 6) remaining calculation
-    const earned = Number(sumRows[0].earned || 0);
+    // const earned = Number(sumRows[0].earned || 0);
+    const { earned } = await getEarnedLastWindowFromRedisOrDb(conn, userId);
     const remainingToday = Math.max(0, daily_limit - earned);
 
     // 7) return same JSON shape (windowHours now reflects configured window)

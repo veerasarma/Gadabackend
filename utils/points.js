@@ -595,5 +595,5 @@ async function creditPoints({
   }
 }
 
-  module.exports = { creditPoints };
+  module.exports = { creditPoints,getEarnedLastWindowFromRedisOrDb };
   
