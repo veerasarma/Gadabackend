@@ -145,184 +145,394 @@ router.get('/:userId/summary', ensureAuth, async (req, res) => {
  * GET /api/profile/:userId/posts?limit=10&cursor=POST_ID
  * Cursor-paged posts by that user with media (images/videos)
  */
+// router.get('/:userId/posts', ensureAuth, async (req, res) => {
+//     const userId = Number(req.params.userId);
+//     const limit = Math.min(25, Math.max(5, Number(req.query.limit) || 10));
+//     const cursor = req.query.cursor ? Number(req.query.cursor) : null;
+  
+//     if (!Number.isFinite(userId)) {
+//       return res.status(400).json({ error: 'Bad user id' });
+//     }
+  
+//     const conn = await pool.getConnection();
+//     try {
+//       const params = [userId];
+//       let where = `p.user_id = ? AND p.is_hidden='0'`;
+//       if (cursor) {
+//         where += ` AND p.post_id < ?`;
+//         params.push(cursor);
+//       }
+  
+//       // 1) base posts (page)
+//       const [rows] = await conn.query(
+//         `
+//         SELECT
+//           p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,p.boosted,p.boosted_at,
+//           u.user_name,
+//           u.user_firstname,
+//           u.user_lastname,
+//           u.user_picture
+//         FROM posts p
+//         JOIN users u ON u.user_id = p.user_id
+//         WHERE ${where}
+//         ORDER BY p.post_id DESC
+//         LIMIT ${limit}
+//         `,
+//         params
+//       );
+  
+//       if (!rows.length) {
+//         return res.json({ items: [], nextCursor: null });
+//       }
+  
+//       // 2) collect ids
+//       const postIds = rows.map(r => r.post_id);
+  
+//       // 3) fetch related data in parallel (same shape as feed)
+//       const [mediaRows, videoRows, photoRows, likeRows, commentRows,viewAggRows] = await Promise.all([
+//         conn
+//           .query(
+//             `SELECT post_id, source_url, source_type
+//                FROM posts_media
+//               WHERE post_id IN (?)`,
+//             [postIds]
+//           )
+//           .then(([r]) => r),
+  
+//         conn
+//           .query(
+//             `SELECT post_id, source
+//                FROM posts_videos
+//               WHERE post_id IN (?)`,
+//             [postIds]
+//           )
+//           .then(([r]) => r),
+  
+//         conn
+//           .query(
+//             `SELECT post_id, album_id, source
+//                FROM posts_photos
+//               WHERE post_id IN (?)`,
+//             [postIds]
+//           )
+//           .then(([r]) => r),
+  
+//         conn
+//           .query(
+//             `SELECT r.post_id, r.user_id, u.user_name
+//                FROM posts_reactions r
+//                JOIN users u ON u.user_id = r.user_id
+//               WHERE r.post_id IN (?) AND r.reaction = 'like'`,
+//             [postIds]
+//           )
+//           .then(([r]) => r),
+  
+//         conn
+//           .query(
+//             `SELECT c.comment_id, c.node_id AS post_id, c.user_id, c.text, c.time,
+//                     u.user_name, u.user_picture AS profileImage
+//                FROM posts_comments c
+//                JOIN users u ON u.user_id = c.user_id
+//               WHERE c.node_type = 'post' AND c.node_id IN (?)
+//               ORDER BY c.time ASC`,
+//             [postIds]
+//           )
+//           .then(([r]) => r),
+//           conn.query(
+//   `SELECT post_id, COUNT(*) AS views
+//      FROM posts_views
+//     WHERE post_id IN (?)
+//     GROUP BY post_id`, [postIds]
+// ),
+//       ]);
+  
+//       // 4) base mapper (like your feed's mapPostRow outcome)
+//       function makePost(r) {
+//         return {
+//           id: String(r.post_id),
+//           boosted: r.boosted,
+//           boosted_at: r.boosted_at,
+//           author: {
+//             id: String(r.user_id),
+//             username: r.user_name,
+//             fullName:
+//               [r.user_firstname, r.user_lastname].filter(Boolean).join(' ') || r.user_name,
+//             profileImage: r.user_picture || null,
+//           },
+//           content: r.text || '',
+//           createdAt: r.time,
+//           privacy: r.privacy,
+//           shares: r.shares,
+//           images: [],
+//           videos: [],
+//           likes: [],     // <-- add likes array
+//           comments: [],  // <-- add comments array
+//         };
+//       }
+  
+//       // 5) stitch like in /posts feed
+//       const byId = new Map(rows.map(r => [r.post_id, makePost(r)]));
+  
+//       // images (posts_media)
+//       for (const m of mediaRows) {
+//         if (m.source_type === 'image') {
+//           const p = byId.get(m.post_id);
+//           if (p) p.images.push(m.source_url);
+//         }
+//       }
+//       // extra photos table (posts_photos)
+//       for (const ph of photoRows) {
+//         const p = byId.get(ph.post_id);
+//         if (p) p.images.push(ph.source);
+//       }
+//       // videos
+//       for (const v of videoRows) {
+//         const p = byId.get(v.post_id);
+//         if (p) p.videos.push(v.source);
+//       }
+//       // likes
+//       for (const l of likeRows) {
+//         const p = byId.get(l.post_id);
+//         if (p) {
+//           p.likes.push({
+//             userId: String(l.user_id),
+//             username: l.user_name,
+//           });
+//         }
+//       }
+//       // comments
+//       for (const c of commentRows) {
+//         const p = byId.get(c.post_id);
+//         if (p) {
+//           p.comments.push({
+//             id: String(c.comment_id),
+//             userId: String(c.user_id),
+//             username: c.user_name,
+//             profileImage: c.profileImage || null,
+//             content: c.text,
+//             createdAt: c.time,
+//           });
+//         }
+//       }
+
+//       const viewsById = new Map();
+// for (const v of viewAggRows) {
+//   viewsById.set(Number(v.post_id), Number(v.views || 0));
+// }
+  
+//       // 6) preserve page order
+//       const items = rows.map(r => byId.get(r.post_id));
+  
+//       // 7) next cursor
+//       const nextCursor = items.length === limit ? items[items.length - 1].id : null;
+  
+//       res.json({ items, nextCursor });
+//     } catch (e) {
+//       console.error('[GET /profile/:id/posts]', e);
+//       res.status(500).json({ error: 'Failed to load posts' });
+//     } finally {
+//       conn.release();
+//     }
+//   });
+
 router.get('/:userId/posts', ensureAuth, async (req, res) => {
-    const userId = Number(req.params.userId);
-    const limit = Math.min(25, Math.max(5, Number(req.query.limit) || 10));
-    const cursor = req.query.cursor ? Number(req.query.cursor) : null;
-  
-    if (!Number.isFinite(userId)) {
-      return res.status(400).json({ error: 'Bad user id' });
+  const userId = Number(req.params.userId);
+  const limit = Math.min(25, Math.max(5, Number(req.query.limit) || 10));
+  const cursor = req.query.cursor ? Number(req.query.cursor) : null;
+
+  if (!Number.isFinite(userId)) {
+    return res.status(400).json({ error: 'Bad user id' });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    const params = [userId];
+    let where = `p.user_id = ? AND p.is_hidden='0'`;
+    if (cursor) {
+      where += ` AND p.post_id < ?`;
+      params.push(cursor);
     }
-  
-    const conn = await pool.getConnection();
-    try {
-      const params = [userId];
-      let where = `p.user_id = ? AND p.is_hidden='0'`;
-      if (cursor) {
-        where += ` AND p.post_id < ?`;
-        params.push(cursor);
-      }
-  
-      // 1) base posts (page)
-      const [rows] = await conn.query(
-        `
-        SELECT
-          p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,p.boosted,p.boosted_at,
-          u.user_name,
-          u.user_firstname,
-          u.user_lastname,
-          u.user_picture
-        FROM posts p
-        JOIN users u ON u.user_id = p.user_id
-        WHERE ${where}
-        ORDER BY p.post_id DESC
-        LIMIT ${limit}
-        `,
-        params
-      );
-  
-      if (!rows.length) {
-        return res.json({ items: [], nextCursor: null });
-      }
-  
-      // 2) collect ids
-      const postIds = rows.map(r => r.post_id);
-  
-      // 3) fetch related data in parallel (same shape as feed)
-      const [mediaRows, videoRows, photoRows, likeRows, commentRows] = await Promise.all([
-        conn
-          .query(
-            `SELECT post_id, source_url, source_type
-               FROM posts_media
-              WHERE post_id IN (?)`,
-            [postIds]
-          )
-          .then(([r]) => r),
-  
-        conn
-          .query(
-            `SELECT post_id, source
-               FROM posts_videos
-              WHERE post_id IN (?)`,
-            [postIds]
-          )
-          .then(([r]) => r),
-  
-        conn
-          .query(
-            `SELECT post_id, album_id, source
-               FROM posts_photos
-              WHERE post_id IN (?)`,
-            [postIds]
-          )
-          .then(([r]) => r),
-  
-        conn
-          .query(
-            `SELECT r.post_id, r.user_id, u.user_name
-               FROM posts_reactions r
-               JOIN users u ON u.user_id = r.user_id
-              WHERE r.post_id IN (?) AND r.reaction = 'like'`,
-            [postIds]
-          )
-          .then(([r]) => r),
-  
-        conn
-          .query(
-            `SELECT c.comment_id, c.node_id AS post_id, c.user_id, c.text, c.time,
-                    u.user_name, u.user_picture AS profileImage
-               FROM posts_comments c
-               JOIN users u ON u.user_id = c.user_id
-              WHERE c.node_type = 'post' AND c.node_id IN (?)
-              ORDER BY c.time ASC`,
-            [postIds]
-          )
-          .then(([r]) => r),
-      ]);
-  
-      // 4) base mapper (like your feed's mapPostRow outcome)
-      function makePost(r) {
-        return {
-          id: String(r.post_id),
-          boosted: r.boosted,
-          boosted_at: r.boosted_at,
-          author: {
-            id: String(r.user_id),
-            username: r.user_name,
-            fullName:
-              [r.user_firstname, r.user_lastname].filter(Boolean).join(' ') || r.user_name,
-            profileImage: r.user_picture || null,
-          },
-          content: r.text || '',
-          createdAt: r.time,
-          privacy: r.privacy,
-          shares: r.shares,
-          images: [],
-          videos: [],
-          likes: [],     // <-- add likes array
-          comments: [],  // <-- add comments array
-        };
-      }
-  
-      // 5) stitch like in /posts feed
-      const byId = new Map(rows.map(r => [r.post_id, makePost(r)]));
-  
-      // images (posts_media)
-      for (const m of mediaRows) {
-        if (m.source_type === 'image') {
-          const p = byId.get(m.post_id);
-          if (p) p.images.push(m.source_url);
-        }
-      }
-      // extra photos table (posts_photos)
-      for (const ph of photoRows) {
-        const p = byId.get(ph.post_id);
-        if (p) p.images.push(ph.source);
-      }
-      // videos
-      for (const v of videoRows) {
-        const p = byId.get(v.post_id);
-        if (p) p.videos.push(v.source);
-      }
-      // likes
-      for (const l of likeRows) {
-        const p = byId.get(l.post_id);
-        if (p) {
-          p.likes.push({
-            userId: String(l.user_id),
-            username: l.user_name,
-          });
-        }
-      }
-      // comments
-      for (const c of commentRows) {
-        const p = byId.get(c.post_id);
-        if (p) {
-          p.comments.push({
-            id: String(c.comment_id),
-            userId: String(c.user_id),
-            username: c.user_name,
-            profileImage: c.profileImage || null,
-            content: c.text,
-            createdAt: c.time,
-          });
-        }
-      }
-  
-      // 6) preserve page order
-      const items = rows.map(r => byId.get(r.post_id));
-  
-      // 7) next cursor
-      const nextCursor = items.length === limit ? items[items.length - 1].id : null;
-  
-      res.json({ items, nextCursor });
-    } catch (e) {
-      console.error('[GET /profile/:id/posts]', e);
-      res.status(500).json({ error: 'Failed to load posts' });
-    } finally {
-      conn.release();
+
+    // 1) base posts (page)
+    const [rows] = await conn.query(
+      `
+      SELECT
+        p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,p.boosted,p.boosted_at,
+        u.user_name,
+        u.user_firstname,
+        u.user_lastname,
+        u.user_picture
+      FROM posts p
+      JOIN users u ON u.user_id = p.user_id
+      WHERE ${where}
+      ORDER BY p.post_id DESC
+      LIMIT ${limit}
+      `,
+      params
+    );
+
+    if (!rows.length) {
+      return res.json({ items: [], nextCursor: null });
     }
-  });
+
+    // 2) collect ids
+    const postIds = rows.map(r => r.post_id);
+
+    // 2.1) get views aggregation
+    const [viewAggRows] = await conn.query(
+      `SELECT post_id, COUNT(*) AS views
+         FROM posts_views
+        WHERE post_id IN (?)
+        GROUP BY post_id`, [postIds]
+    );
+    const viewsById = new Map();
+    for (const v of viewAggRows) {
+      viewsById.set(Number(v.post_id), Number(v.views || 0));
+    }
+
+    // 3) fetch related data in parallel (same shape as feed)
+    const [mediaRows, videoRows, photoRows, likeRows, commentRows] = await Promise.all([
+      conn
+        .query(
+          `SELECT post_id, source_url, source_type
+             FROM posts_media
+            WHERE post_id IN (?)`,
+          [postIds]
+        )
+        .then(([r]) => r),
+
+      conn
+        .query(
+          `SELECT post_id, source
+             FROM posts_videos
+            WHERE post_id IN (?)`,
+          [postIds]
+        )
+        .then(([r]) => r),
+
+      conn
+        .query(
+          `SELECT post_id, album_id, source
+             FROM posts_photos
+            WHERE post_id IN (?)`,
+          [postIds]
+        )
+        .then(([r]) => r),
+
+      conn
+        .query(
+          `SELECT r.post_id, r.user_id, u.user_name
+             FROM posts_reactions r
+             JOIN users u ON u.user_id = r.user_id
+            WHERE r.post_id IN (?) AND r.reaction = 'like'`,
+          [postIds]
+        )
+        .then(([r]) => r),
+
+      conn
+        .query(
+          `SELECT c.comment_id, c.node_id AS post_id, c.user_id, c.text, c.time,
+                  u.user_name, u.user_picture AS profileImage
+             FROM posts_comments c
+             JOIN users u ON u.user_id = c.user_id
+            WHERE c.node_type = 'post' AND c.node_id IN (?)
+            ORDER BY c.time ASC`,
+          [postIds]
+        )
+        .then(([r]) => r),
+    ]);
+
+    // 4) base mapper (like your feed's mapPostRow outcome)
+    function makePost(r) {
+      return {
+        id: String(r.post_id),
+        boosted: r.boosted,
+        boosted_at: r.boosted_at,
+        author: {
+          id: String(r.user_id),
+          username: r.user_name,
+          fullName:
+            [r.user_firstname, r.user_lastname].filter(Boolean).join(' ') || r.user_name,
+          profileImage: r.user_picture || null,
+        },
+        content: r.text || '',
+        createdAt: r.time,
+        privacy: r.privacy,
+        shares: r.shares,
+        images: [],
+        videos: [],
+        likes: [],
+        comments: [],
+        // Views will be injected below
+      };
+    }
+
+    // 5) stitch like in /posts feed
+    const byId = new Map(rows.map(r => [r.post_id, makePost(r)]));
+    // images (posts_media)
+    for (const m of mediaRows) {
+      if (m.source_type === 'image') {
+        const p = byId.get(m.post_id);
+        if (p) p.images.push(m.source_url);
+      }
+    }
+    // extra photos table (posts_photos)
+    for (const ph of photoRows) {
+      const p = byId.get(ph.post_id);
+      if (p) p.images.push(ph.source);
+    }
+    // videos
+    for (const v of videoRows) {
+      const p = byId.get(v.post_id);
+      if (p) p.videos.push(v.source);
+    }
+    // likes
+    for (const l of likeRows) {
+      const p = byId.get(l.post_id);
+      if (p) {
+        p.likes.push({
+          userId: String(l.user_id),
+          username: l.user_name,
+        });
+      }
+    }
+    // comments
+    for (const c of commentRows) {
+      const p = byId.get(c.post_id);
+      if (p) {
+        p.comments.push({
+          id: String(c.comment_id),
+          userId: String(c.user_id),
+          username: c.user_name,
+          profileImage: c.profileImage || null,
+          content: c.text,
+          createdAt: c.time,
+        });
+      }
+    }
+
+    // --- ADD: inject views count into each post ---
+    for (const postId of postIds) {
+      const p = byId.get(postId);
+      if (p) {
+        p.views = viewsById.get(postId) || 0;
+      }
+    }
+
+    // 6) preserve page order
+    const items = rows.map(r => byId.get(r.post_id));
+    // 7) next cursor
+    const nextCursor = items.length === limit ? items[items.length - 1].id : null;
+
+    res.json({ items, nextCursor });
+  } catch (e) {
+    console.error('[GET /profile/:id/posts]', e);
+    res.status(500).json({ error: 'Failed to load posts' });
+  } finally {
+    conn.release();
+  }
+});
+
   
 
 /**
