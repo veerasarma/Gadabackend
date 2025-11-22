@@ -149,33 +149,61 @@ router.get('/', ensureAuth, async (req, res) => {
     }
 
     // B) main feed (exclude boosted-in-window in ranking)
-    const [rows] = await pool.promise().query(`
-      SELECT
-        p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
-        p.reaction_like_count, p.comments,
-        p.boosted, p.boosted_at,
-        p.post_type,
-        IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
-        u.user_picture AS authorProfileImage, user_subscribed,user_package,
+    let rows;
+      if (offset === 0) {
+      // First page - no post_id filter
+      [rows] = await pool.promise().query(`
+        SELECT
+          p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+          p.reaction_like_count, p.comments,
+          p.boosted, p.boosted_at,
+          p.post_type,
+          IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+          u.user_picture AS authorProfileImage, user_subscribed,user_package,
+          TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
+          (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
+          (
+            (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
+            (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
+          ) AS score
+        FROM posts p
+        JOIN users u ON u.user_id = p.user_id
+        WHERE p.is_hidden = '0'
+          AND NOT (
+            p.boosted = '1' AND p.boosted_at IS NOT NULL
+            AND p.boosted_at >= (NOW() - INTERVAL 48 HOUR)
+          )
+        ORDER BY post_id DESC
+        LIMIT ? 
+      `, [limit]);
+    } else {
+      // Subsequent pages - use offset as last_post_id cursor
+      [rows] = await pool.promise().query(`
+        SELECT
+          p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+          p.reaction_like_count, p.comments,
+          p.boosted, p.boosted_at,
+          p.post_type,
+          IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+          u.user_picture AS authorProfileImage, user_subscribed,user_package,
+          TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
+          (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
+          (
+            (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
+            (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
+          ) AS score
+        FROM posts p
+        JOIN users u ON u.user_id = p.user_id
+        WHERE p.post_id < ? AND p.is_hidden = '0'
+          AND NOT (
+            p.boosted = '1' AND p.boosted_at IS NOT NULL
+            AND p.boosted_at >= (NOW() - INTERVAL 48 HOUR)
+          )
+        ORDER BY post_id DESC
+        LIMIT ? 
+      `, [offset, limit]);
+    }
 
-        TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
-        (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
-
-        (
-          (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
-          (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
-        ) AS score
-
-      FROM posts p
-      JOIN users u ON u.user_id = p.user_id
-      WHERE p.is_hidden = '0'
-        AND NOT (
-          p.boosted = '1' AND p.boosted_at IS NOT NULL
-          AND p.boosted_at >= (NOW() - INTERVAL 48 HOUR)
-        )
-      ORDER BY post_id DESC
-      LIMIT ? OFFSET ?
-    `,[limit, offset]);
 
     // If nothing at all, return empty in either format
     if (!rows.length && !promoted) {
