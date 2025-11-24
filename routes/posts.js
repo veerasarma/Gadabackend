@@ -970,9 +970,10 @@ router.post(
         [postId]
       );
       out.videos = vids.map(v => v.source);
-      console.log(hasMedia,wordCount,'hasMediahasMediahasMedia')
+      // console.log(hasMedia,wordCount,'hasMediahasMediahasMedia')
       //Earning points section for post create 
-     if (!hasMedia && wordCount < 400) {
+     if (hasMedia || (!hasMedia && wordCount >= 400)) {
+      // console.log('inside inside inside')
       const out1 = await creditPoints({
         userId: userId,
         nodeId: postId,
