@@ -823,6 +823,13 @@ function extractHashtags(text) {
   return Array.from(new Set(found)); // unique
 }
 
+function countWords(str) {
+  // Remove any extra whitespace, split by whitespace, and count
+  if (!str) return 0;
+  return str.trim().split(/\s+/).length;
+}
+
+
 router.post(
   '/',
   ensureAuth,
@@ -833,8 +840,12 @@ router.post(
     if (!errors.isEmpty())
       return res.status(400).json({ errors: errors.array() });
 
+    
+    
     const { userId, content, media = [],text='' } = req.body;
-    console.log(req.body,'req.bodyreq.bodyreq.body')
+    
+    const hasMedia = media && media.length > 0;
+    const wordCount = countWords(content);
 
     // only author can create for themselves
     if (String(userId) !== String(req.user.userId)) {
@@ -961,7 +972,7 @@ router.post(
       out.videos = vids.map(v => v.source);
 
       //Earning points section for post create 
-     
+     if (!hasMedia && wordCount < 400) {
       const out1 = await creditPoints({
         userId: userId,
         nodeId: postId,
@@ -970,6 +981,7 @@ router.post(
         checkActivePackage,         // your existing fn
       });
       console.log(out1,'out1out1out1out1')
+    }
 
       // Earning points section for post create
 
