@@ -970,7 +970,7 @@ router.post(
         [postId]
       );
       out.videos = vids.map(v => v.source);
-
+      console.log(hasMedia,wordCount,'hasMediahasMediahasMedia')
       //Earning points section for post create 
      if (!hasMedia && wordCount < 400) {
       const out1 = await creditPoints({
