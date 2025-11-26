@@ -448,7 +448,6 @@ function pad(n){ return n < 10 ? '0'+n : '' }
 //   return { earned: total, populatedFrom: 'db' };
 // }
 
-
 async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
   const key = `user:${userId}:points24h`;
   let val;
@@ -462,26 +461,28 @@ async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
     return { earned: Number(val) || 0, populatedFrom: 'redis' };
   }
 
-  // Nigerian midnight reset (UTC+1)
-  const now = new Date();
+  const TEST_TIME = '2025-11-26T22:50:00Z'; // 10:50 PM UTC - before midnight Nigeria time
+// const TEST_TIME = '2025-11-26T23:10:00Z'; // 11:10 PM UTC - just after midnight Nigeria time
 
-  // Calculate today's Nigerian midnight in UTC
-  // Nigeria is UTC+1, so Nigerian midnight is today's date at 23:00 UTC of the previous day
-  const nigeriaMidnightUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), -1, 0, 0));
-  // Correction: JavaScript Date UTC hour -1 rolls back to previous date 23:00 UTC
+// const nowUTC = new Date(TEST_TIME);
 
-  // If current UTC time is before Nigerian midnight UTC, use yesterday's Nigerian midnight UTC
-  // else use today's Nigerian midnight UTC
-  let sinceDate;
-  console.log(now,'sinceDate',nigeriaMidnightUtc,'nigeriaMidnightUtc');
-  if (now < nigeriaMidnightUtc) {
-    // Use yesterday Nigerian midnight UTC (subtract 1 day)
-    sinceDate = new Date(nigeriaMidnightUtc.getTime() - 24 * 3600 * 1000);
-  } else {
-    sinceDate = nigeriaMidnightUtc;
-  }
+  const nowUTC = new Date();
+  // Convert to Nigeria time (UTC+1)
+  const nigeriaOffsetMillis = 1 * 60 * 60 * 1000; // 1 hour in ms
+  const nowNigeria = new Date(nowUTC.getTime() + nigeriaOffsetMillis);
 
-  const sinceSql = sinceDate.toISOString().slice(0, 19).replace('T', ' ');
+  // Get midnight in Nigeria time (00:00 local today)
+  const nigeriaMidnightLocal = new Date(
+    nowNigeria.getFullYear(),
+    nowNigeria.getMonth(),
+    nowNigeria.getDate(), 0, 0, 0
+  );
+
+  // Now convert that local Nigeria midnight back to UTC:
+  const nigeriaMidnightUTC = new Date(nigeriaMidnightLocal.getTime() - nigeriaOffsetMillis);
+
+  // Prepare MySQL datetime format
+  const sinceSql = nigeriaMidnightUTC.toISOString().slice(0, 19).replace('T', ' ');
 
   const sql = `
     SELECT COALESCE(SUM(points),0) AS s
@@ -500,7 +501,6 @@ async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
   }
   return { earned: total, populatedFrom: 'db' };
 }
-
 
 
 // --- Main Business Logic Function ---
