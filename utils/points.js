@@ -473,6 +473,7 @@ async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
   // If current UTC time is before Nigerian midnight UTC, use yesterday's Nigerian midnight UTC
   // else use today's Nigerian midnight UTC
   let sinceDate;
+  console.log(now,'sinceDate',nigeriaMidnightUtc,'nigeriaMidnightUtc');
   if (now < nigeriaMidnightUtc) {
     // Use yesterday Nigerian midnight UTC (subtract 1 day)
     sinceDate = new Date(nigeriaMidnightUtc.getTime() - 24 * 3600 * 1000);
