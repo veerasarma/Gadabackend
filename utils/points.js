@@ -464,9 +464,13 @@ async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
   const TEST_TIME = '2025-11-26T22:50:00Z'; // 10:50 PM UTC - before midnight Nigeria time
 // const TEST_TIME = '2025-11-26T23:10:00Z'; // 11:10 PM UTC - just after midnight Nigeria time
 
-// const nowUTC = new Date(TEST_TIME);
+  let nowUTC;
+if (userId == '9010') {
+    nowUTC = new Date(TEST_TIME);
+} else {
+    nowUTC = new Date();
+}
 
-  const nowUTC = new Date();
   // Convert to Nigeria time (UTC+1)
   const nigeriaOffsetMillis = 1 * 60 * 60 * 1000; // 1 hour in ms
   const nowNigeria = new Date(nowUTC.getTime() + nigeriaOffsetMillis);
