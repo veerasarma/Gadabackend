@@ -415,6 +415,40 @@ function pad(n){ return n < 10 ? '0'+n : '' }
 
 // --- Single Redis Key Per User for 24hr Window ---
 
+// async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
+//   const key = `user:${userId}:points24h`;
+//   let val;
+//   try {
+//     val = await redisClient.get(key);
+//   } catch (err) {
+//     val = null;
+//   }
+
+//   if (val !== null && val !== undefined) {
+//     return { earned: Number(val) || 0, populatedFrom: 'redis' };
+//   }
+
+//   // Redis key absent: backfill from DB and set key with 24h TTL
+//   const sinceDate = new Date(Date.now() - 24 * 3600 * 1000);
+//   const sinceSql = sinceDate.toISOString().slice(0, 19).replace('T', ' ');
+//   const sql = `
+//     SELECT COALESCE(SUM(points),0) AS s
+//     FROM log_points
+//     WHERE user_id = ?
+//       AND time >= ?
+//   `;
+//   let total = 0;
+//   try {
+//     const [rows] = await conn.query(sql, [userId, sinceSql]);
+//     total = Number(rows[0]?.s || 0);
+//     await redisClient.set(key, total, 'EX', 24 * 3600);
+//   } catch (err) {
+//     // fallback: no Redis set
+//   }
+//   return { earned: total, populatedFrom: 'db' };
+// }
+
+
 async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
   const key = `user:${userId}:points24h`;
   let val;
@@ -428,15 +462,33 @@ async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
     return { earned: Number(val) || 0, populatedFrom: 'redis' };
   }
 
-  // Redis key absent: backfill from DB and set key with 24h TTL
-  const sinceDate = new Date(Date.now() - 24 * 3600 * 1000);
+  // Nigerian midnight reset (UTC+1)
+  const now = new Date();
+
+  // Calculate today's Nigerian midnight in UTC
+  // Nigeria is UTC+1, so Nigerian midnight is today's date at 23:00 UTC of the previous day
+  const nigeriaMidnightUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), -1, 0, 0));
+  // Correction: JavaScript Date UTC hour -1 rolls back to previous date 23:00 UTC
+
+  // If current UTC time is before Nigerian midnight UTC, use yesterday's Nigerian midnight UTC
+  // else use today's Nigerian midnight UTC
+  let sinceDate;
+  if (now < nigeriaMidnightUtc) {
+    // Use yesterday Nigerian midnight UTC (subtract 1 day)
+    sinceDate = new Date(nigeriaMidnightUtc.getTime() - 24 * 3600 * 1000);
+  } else {
+    sinceDate = nigeriaMidnightUtc;
+  }
+
   const sinceSql = sinceDate.toISOString().slice(0, 19).replace('T', ' ');
+
   const sql = `
     SELECT COALESCE(SUM(points),0) AS s
     FROM log_points
     WHERE user_id = ?
       AND time >= ?
   `;
+
   let total = 0;
   try {
     const [rows] = await conn.query(sql, [userId, sinceSql]);
@@ -447,6 +499,8 @@ async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
   }
   return { earned: total, populatedFrom: 'db' };
 }
+
+
 
 // --- Main Business Logic Function ---
 
