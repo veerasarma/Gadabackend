@@ -448,7 +448,7 @@ function pad(n){ return n < 10 ? '0'+n : '' }
 //   return { earned: total, populatedFrom: 'db' };
 // }
 
-async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
+async function getEarnedLastWindowFromRedisOrDb(conn, userId,testNowUTC = null) {
   const key = `user:${userId}:points24h`;
   let val;
   try {
@@ -458,36 +458,37 @@ async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
   }
 
   if (val !== null && val !== undefined) {
+    console.log('Redis hit for user', userId, 'points24h=', val);
     return { earned: Number(val) || 0, populatedFrom: 'redis' };
   }
 
-  const TEST_TIME = '2025-11-26T22:50:00Z'; // 10:50 PM UTC - before midnight Nigeria time
-// const TEST_TIME = '2025-11-26T23:10:00Z'; // 11:10 PM UTC - just after midnight Nigeria time
+  // Use test date/time if provided, otherwise current actual time
+  const nowUTC = testNowUTC ? new Date(testNowUTC) : new Date();
 
-  let nowUTC;
-if (userId == '9010') {
-    nowUTC = new Date(TEST_TIME);
-} else {
-    nowUTC = new Date();
-}
-
-  // Convert to Nigeria time (UTC+1)
-  const nigeriaOffsetMillis = 1 * 60 * 60 * 1000; // 1 hour in ms
+  const nigeriaOffsetMillis = 1 * 60 * 60 * 1000; // UTC+1
   const nowNigeria = new Date(nowUTC.getTime() + nigeriaOffsetMillis);
 
-  // Get midnight in Nigeria time (00:00 local today)
+  // --- Calculate current Nigerian midnight (start of day) ---
   const nigeriaMidnightLocal = new Date(
     nowNigeria.getFullYear(),
     nowNigeria.getMonth(),
     nowNigeria.getDate(), 0, 0, 0
   );
-
-  // Now convert that local Nigeria midnight back to UTC:
   const nigeriaMidnightUTC = new Date(nigeriaMidnightLocal.getTime() - nigeriaOffsetMillis);
 
-  // Prepare MySQL datetime format
+  // --- Prepare MySQL datetime format (UTC) ---
   const sinceSql = nigeriaMidnightUTC.toISOString().slice(0, 19).replace('T', ' ');
 
+  // --- Calculate seconds remaining until next Nigerian midnight ---
+  const nextNigeriaMidnightLocal = new Date(
+    nowNigeria.getFullYear(),
+    nowNigeria.getMonth(),
+    nowNigeria.getDate() + 1, 0, 0, 0
+  );
+  const nextNigeriaMidnightUTC = new Date(nextNigeriaMidnightLocal.getTime() - nigeriaOffsetMillis);
+  const secondsUntilNextNigeriaMidnight = Math.floor((nextNigeriaMidnightUTC - nowUTC) / 1000);
+
+  // --- Run DB query and set Redis expiry to match the Nigerian day boundary ---
   const sql = `
     SELECT COALESCE(SUM(points),0) AS s
     FROM log_points
@@ -499,12 +500,13 @@ if (userId == '9010') {
   try {
     const [rows] = await conn.query(sql, [userId, sinceSql]);
     total = Number(rows[0]?.s || 0);
-    await redisClient.set(key, total, 'EX', 24 * 3600);
+    await redisClient.set(key, total, 'EX', secondsUntilNextNigeriaMidnight);
   } catch (err) {
     // fallback: no Redis set
   }
   return { earned: total, populatedFrom: 'db' };
 }
+
 
 
 // --- Main Business Logic Function ---
@@ -573,8 +575,8 @@ async function creditPoints({
 
     // === Check last 24h earned ===
     const { earned } = await getEarnedLastWindowFromRedisOrDb(conn, userId);
-    // console.log(dailyLimit,'dailyLimit',userId);
-    // console.log(earned,'earned',userId);
+    console.log(dailyLimit,'dailyLimit',userId);
+    console.log(earned,'earned',userId);
     const remainingToday = Math.max(0, dailyLimit - earned);
 
     if (remainingToday <= 0) {
@@ -592,21 +594,21 @@ async function creditPoints({
     );
     const currentPoints = Number(userRows[0]?.user_points || 0);
 
-    // Insert history (log_points)
-    await conn.query(
-      `INSERT INTO log_points (user_id, node_id, node_type, points, time)
-       VALUES (?, ?, ?, ?, NOW())`,
-      [userId, nodeId, normalizedType, toAward]
-    );
+    // // Insert history (log_points)
+    // await conn.query(
+    //   `INSERT INTO log_points (user_id, node_id, node_type, points, time)
+    //    VALUES (?, ?, ?, ?, NOW())`,
+    //   [userId, nodeId, normalizedType, toAward]
+    // );
 
-    // Update user_points
-    await conn.query(
-      `UPDATE users
-          SET user_points   = COALESCE(user_points, 0)   + ?,
-              points_earned = '1'
-        WHERE user_id = ?`,
-      [toAward, userId]
-    );
+    // // Update user_points
+    // await conn.query(
+    //   `UPDATE users
+    //       SET user_points   = COALESCE(user_points, 0)   + ?,
+    //           points_earned = '1'
+    //     WHERE user_id = ?`,
+    //   [toAward, userId]
+    // );
 
     await conn.commit();
     conn.release();
