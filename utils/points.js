@@ -53,7 +53,7 @@ function pad(n){ return n < 10 ? '0'+n : '' }
 //   return { earned: total, populatedFrom: 'db' };
 // }
 
-async function getEarnedLastWindowFromRedisOrDb(conn, userId,testNowUTC = null) {
+async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
   const key = `user:${userId}:points24h`;
   let val;
   try {
@@ -62,38 +62,52 @@ async function getEarnedLastWindowFromRedisOrDb(conn, userId,testNowUTC = null) 
     val = null;
   }
 
+  // If Redis has a value, keep existing behaviour: just return it
   if (val !== null && val !== undefined) {
-    console.log('Redis hit for user', userId, 'points24h=', val);
     return { earned: Number(val) || 0, populatedFrom: 'redis' };
   }
 
-  // Use test date/time if provided, otherwise current actual time
-  const nowUTC = testNowUTC ? new Date(testNowUTC) : new Date();
+  // -------- Nigerian midnight window + TTL logic starts here --------
 
   const nigeriaOffsetMillis = 1 * 60 * 60 * 1000; // UTC+1
+
+  // "Now" in UTC
+  const nowUTC = new Date();
+
+  // Convert to Nigeria local time
   const nowNigeria = new Date(nowUTC.getTime() + nigeriaOffsetMillis);
 
-  // --- Calculate current Nigerian midnight (start of day) ---
+  // Start of today in Nigeria (00:00 local)
   const nigeriaMidnightLocal = new Date(
     nowNigeria.getFullYear(),
     nowNigeria.getMonth(),
     nowNigeria.getDate(), 0, 0, 0
   );
-  const nigeriaMidnightUTC = new Date(nigeriaMidnightLocal.getTime() - nigeriaOffsetMillis);
 
-  // --- Prepare MySQL datetime format (UTC) ---
+  // Same instant expressed as UTC
+  const nigeriaMidnightUTC = new Date(
+    nigeriaMidnightLocal.getTime() - nigeriaOffsetMillis
+  );
+
+  // Lower bound for DB query (UTC datetime string)
   const sinceSql = nigeriaMidnightUTC.toISOString().slice(0, 19).replace('T', ' ');
 
-  // --- Calculate seconds remaining until next Nigerian midnight ---
+  // Compute TTL: seconds until next Nigerian midnight
   const nextNigeriaMidnightLocal = new Date(
     nowNigeria.getFullYear(),
     nowNigeria.getMonth(),
     nowNigeria.getDate() + 1, 0, 0, 0
   );
-  const nextNigeriaMidnightUTC = new Date(nextNigeriaMidnightLocal.getTime() - nigeriaOffsetMillis);
-  const secondsUntilNextNigeriaMidnight = Math.floor((nextNigeriaMidnightUTC - nowUTC) / 1000);
+  const nextNigeriaMidnightUTC = new Date(
+    nextNigeriaMidnightLocal.getTime() - nigeriaOffsetMillis
+  );
+  const secondsUntilNextNigeriaMidnight = Math.max(
+    1,
+    Math.floor((nextNigeriaMidnightUTC.getTime() - nowUTC.getTime()) / 1000)
+  );
 
-  // --- Run DB query and set Redis expiry to match the Nigerian day boundary ---
+  // -------- Nigerian midnight logic ends; rest is your original DB + Redis code --------
+
   const sql = `
     SELECT COALESCE(SUM(points),0) AS s
     FROM log_points
@@ -105,10 +119,13 @@ async function getEarnedLastWindowFromRedisOrDb(conn, userId,testNowUTC = null) 
   try {
     const [rows] = await conn.query(sql, [userId, sinceSql]);
     total = Number(rows[0]?.s || 0);
+
+    // IMPORTANT: TTL is now "until next Nigerian midnight", not fixed 24h
     await redisClient.set(key, total, 'EX', secondsUntilNextNigeriaMidnight);
   } catch (err) {
     // fallback: no Redis set
   }
+
   return { earned: total, populatedFrom: 'db' };
 }
 
@@ -179,13 +196,18 @@ async function creditPoints({
     }
 
     // === Check last 24h earned ===
-    if(userId=='9010'){
-      const { earned } = await getEarnedLastWindowFromRedisOrDb(conn, userId,'2025-11-27T23:05:00Z');
-    }
-    else
-    {
-      const { earned } = await getEarnedLastWindowFromRedisOrDb(conn, userId);
-    }
+   let earned;
+
+  if (userId === '9010') {
+    ({ earned } = await getEarnedLastWindowFromRedisOrDb(
+      conn,
+      userId,
+      '2025-11-26T23:05:00Z'
+    ));
+  } else {
+    ({ earned } = await getEarnedLastWindowFromRedisOrDb(conn, userId));
+  }
+
   
 
     console.log(dailyLimit,'dailyLimit',userId);
