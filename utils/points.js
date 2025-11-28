@@ -90,8 +90,9 @@ async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
   );
 
   // Lower bound for DB query (UTC datetime string)
-  const sinceSql = nigeriaMidnightUTC.toISOString().slice(0, 19).replace('T', ' ');
-  console.log(sinceSql,'sinceSqlsinceSqlsinceSql')
+  // const sinceSql = nigeriaMidnightUTC.toISOString().slice(0, 19).replace('T', ' ');
+  const sinceSql = nowUTC;
+  // console.log(sinceSql,'sinceSqlsinceSqlsinceSql')
   // Compute TTL: seconds until next Nigerian midnight
   const nextNigeriaMidnightLocal = new Date(
     nowNigeria.getFullYear(),
