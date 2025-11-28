@@ -211,8 +211,8 @@ async function creditPoints({
 
   
 
-    console.log(dailyLimit,'dailyLimit',userId);
-    console.log(earned,'earned',userId);
+    // console.log(dailyLimit,'dailyLimit',userId);
+    // console.log(earned,'earned',userId);
     const remainingToday = Math.max(0, dailyLimit - earned);
 
     if (remainingToday <= 0) {
