@@ -180,7 +180,7 @@ async function creditPoints({
 
     // === Check last 24h earned ===
     if(userId=='9010'){
-      const { earned } = await getEarnedLastWindowFromRedisOrDb(conn, userId,'2025-11-27T22:50:00Z');
+      const { earned } = await getEarnedLastWindowFromRedisOrDb(conn, userId,'2025-11-27T23:05:00Z');
     }
     else
     {
