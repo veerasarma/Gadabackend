@@ -840,18 +840,20 @@ router.post(
     if (!errors.isEmpty())
       return res.status(400).json({ errors: errors.array() });
 
-    
-    
     const { userId, content, media = [],text='' } = req.body;
     
     const hasMedia = media && media.length > 0;
     const wordCount = countWords(content);
+    if(!hasMedia && wordCount < 400)
+    {
+      return res.status(403).json({ error: 'Without media upload not allowed to create post ' });
+    }
 
     // only author can create for themselves
     if (String(userId) !== String(req.user.userId)) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    console.log(text,'typetypetype')
+
     let post_type = (text=='live' || text=='Live')?'live':'status';
   
     
