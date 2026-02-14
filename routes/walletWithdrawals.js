@@ -26,10 +26,53 @@ router.post(
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
+    // ------------- Withdrawal Date Validation -------------
+    const now = new Date();
+    const currentDay = now.getDate(); // 1-31
+    const currentMonth = now.getMonth() + 1; // 1-12
+    const currentYear = now.getFullYear();
+
+    // Check if current date is between 25th and 30th
+    const isWithdrawalPeriod = currentDay >= 25 && currentDay <= 30;
+
+    if (!isWithdrawalPeriod) {
+      // Calculate next withdrawal period
+      let nextMonth = currentMonth;
+      let nextYear = currentYear;
+      
+      if (currentDay > 30) {
+        // If we're past 30th, next period is 25th of next month
+        nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+        nextYear = currentMonth === 12 ? currentYear + 1 : currentYear;
+      }
+
+      const nextWithdrawalStart = new Date(nextYear, nextMonth - 1, 25);
+      const nextWithdrawalEnd = new Date(nextYear, nextMonth - 1, 30);
+
+      const formatDate = (date) => {
+        return date.toLocaleDateString('en-US', { 
+          month: 'long', 
+          day: 'numeric', 
+          year: 'numeric' 
+        });
+      };
+
+      return res.status(403).json({
+        error: "Withdrawal portal is closed",
+        message: "The withdrawal portal opens every 25th to 30th of every month.",
+        nextWithdrawalPeriod: {
+          start: formatDate(nextWithdrawalStart),
+          end: formatDate(nextWithdrawalEnd)
+        },
+        currentDate: formatDate(now)
+      });
+    }
+
     const userId = Number(req.user.userId);
     const { amount, method, transferTo } = req.body;
     const amt = Number(amount);
-    const MIN_WITHDRAW = 1000;
+    const MIN_WITHDRAW = 10000;
+    
     if (amt < MIN_WITHDRAW) {
       return res.status(400).json({ error: `Minimum withdrawal is ₦${MIN_WITHDRAW}` });
     }
@@ -43,6 +86,7 @@ router.post(
         [userId]
       );
       const balance = Number(u[0]?.user_wallet_balance ?? 0);
+      
       if (amt > balance) {
         await conn.rollback();
         conn.release();
@@ -72,6 +116,7 @@ router.post(
     }
   }
 );
+
 
 
 

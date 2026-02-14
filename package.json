@@ -11,9 +11,11 @@
     "start": "cross-env NODE_ENV=production DOTENV_CONFIG_PATH=.env-prod node -r dotenv/config app.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.985.0",
     "agora-access-token": "^2.0.4",
     "axios": "^1.11.0",
     "bcrypt": "^6.0.0",
+    "bullmq": "^5.66.0",
     "canvas": "^3.2.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

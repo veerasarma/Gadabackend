@@ -7,31 +7,47 @@ const { encodeId, decodeId } = require('../utils/idCipher');
 const multer        = require('multer');
 const path          = require('path');
 const { ensureAuth } = require('../middlewares/auth');
+const crypto = require('crypto');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 
-
-const storage = multer.diskStorage({
-  destination: path.join(__dirname, '../uploads/profile'),
-  filename: (_, file, cb) => {
-    const safe = file.originalname
-      .replace(/\s+/g, '_')
-      .replace(/[^a-zA-Z0-9_\.-]/g, '');
-    cb(null, `avatar_${Date.now()}_${safe}`);
-  }
+const r2Client = new S3Client({
+  region: 'auto',
+  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  },
 });
+
+const R2_BUCKET = process.env.R2_BUCKET_NAME;
+const R2_PUBLIC_BASE_URL = process.env.R2_PUBLIC_BASE_URL || ''; // e.g. 
+
+
+const IMAGE_REGEX = /\.(jpe?g|png|gif)$/i;
+
+function safeName(originalName) {
+  const safe = originalName
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9_\.-]/g, '');
+  const stamp = Date.now().toString(36);
+  const rnd = crypto.randomBytes(4).toString('hex');
+  return `avatar_${stamp}_${rnd}_${safe}`;
+}
+
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter: (_, file, cb) => {
-    const ok = /\.(jpe?g|png|gif)$/i.test(file.originalname);
+    const ok = IMAGE_REGEX.test(file.originalname);
     cb(ok ? null : new Error('Only image files allowed'), ok);
   },
-  limits: { fileSize: 5 * 1024 * 1024 }  // 5MB
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
 
-function sanitizeQ(q='') {
+function sanitizeQ(q = '') {
   return q.trim().replace(/\s+/g, ' ');
 }
 
-// 2) PUT /api/users/:hash/avatar
+// ---------- PUT /api/users/:hash/avatar ----------
 router.put(
   '/:hash/avatar',
   ensureAuth,
@@ -44,7 +60,7 @@ router.put(
     } catch {
       return res.status(404).json({ error: 'Invalid user' });
     }
-  
+
     if (req.user.userId != userId) {
       return res.status(403).json({ error: 'Not allowed' });
     }
@@ -53,24 +69,43 @@ router.put(
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // 4) Save new path
-    const avatarPath = `/uploads/profile/${path.basename(req.file.path)}`;
+    // 4) Upload to R2
+    const fileName = safeName(req.file.originalname || 'avatar');
+    // R2 object key – you can mimic the same folder name: profile/...
+    const r2Key = `uploads/profile/${fileName}`;
+
     try {
+      const putCmd = new PutObjectCommand({
+        Bucket: R2_BUCKET,
+        Key: r2Key,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+        ACL: 'public-read', // or use bucket policy instead
+      });
+      await r2Client.send(putCmd);
+
+      // We keep the same DB path structure as before:
+      const avatarPath = `/uploads/profile/${fileName}`;
+
       await pool.query(
         'UPDATE users SET user_picture = ? WHERE user_id = ?',
         [avatarPath, userId]
       );
-      // 5) Return new URL (opaque ID if using hashids)
+
+      // If you want a real public URL based on R2_PUBLIC_BASE_URL:
+      // const publicUrl = R2_PUBLIC_BASE_URL ? `${R2_PUBLIC_BASE_URL}/${r2Key}` : avatarPath;
+
       res.json({
-        avatarUrl: avatarPath
+        avatarUrl: avatarPath,
       });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: 'DB update failed' });
+      res.status(500).json({ error: 'Upload or DB update failed' });
     }
   }
 );
 
+// ---------- PUT /api/users/:hash/cover ----------
 router.put(
   '/:hash/cover',
   ensureAuth,
@@ -83,7 +118,7 @@ router.put(
     } catch {
       return res.status(404).json({ error: 'Invalid user' });
     }
-  
+
     if (req.user.userId != userId) {
       return res.status(403).json({ error: 'Not allowed' });
     }
@@ -92,23 +127,37 @@ router.put(
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // 4) Save new path
-    const avatarPath = `/uploads/profile/${path.basename(req.file.path)}`;
+    // 4) Upload to R2 (reuse same logic)
+    const fileName = safeName(req.file.originalname || 'cover');
+    const r2Key = `uploads/profile/${fileName}`;
+
     try {
+      const putCmd = new PutObjectCommand({
+        Bucket: R2_BUCKET,
+        Key: r2Key,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+        ACL: 'public-read',
+      });
+      await r2Client.send(putCmd);
+
+      const coverPath = `/uploads/profile/${fileName}`;
+
       await pool.query(
         'UPDATE users SET user_cover = ? WHERE user_id = ?',
-        [avatarPath, userId]
+        [coverPath, userId]
       );
-      // 5) Return new URL (opaque ID if using hashids)
+
       res.json({
-        avatarUrl: avatarPath
+        avatarUrl: coverPath, // or `coverUrl` if you prefer
       });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: 'DB update failed' });
+      res.status(500).json({ error: 'Upload or DB update failed' });
     }
   }
 );
+
 
 router.get(
   '/search',

@@ -80,6 +80,36 @@ function normalizeRef(raw) {
 }
 
 
+exports.resendmail = async (req, res, next) => {
+  const system = req.system;
+  // console.log("resendmail");
+  const [datas] = await db.query("SELECT * FROM users WHERE user_approved != '1' ORDER BY `users`.`user_id` DESC LIMIT 2;");
+  for (let i = 0; i < datas.length; i++) {
+    let username = datas[i].user_name;
+    let firstname = datas[i].first_name;
+    let lastname = datas[i].last_name;
+    let user_email = datas[i].user_email;
+    let email_verification_code = datas[i].user_email_verification_code;
+    const subject = `Just one more step to get started on ${system.system_title}`;
+      const name = system.show_usernames_enabled
+        ? username
+        : `${firstname} ${lastname}`;
+    
+      const mailheader = {
+        "List-Unsubscribe": `<mailto:unsubscribe@gada.chat>, <${system.system_url}/unsubscribe?email=${user_email}>`
+      }
+
+      await sendEmail(user_email, mailheader, subject, "activation_email", {
+        name,
+        email_verification_code,
+        system: {
+          system_url: system.system_url,
+          system_title: system.system_title,
+        },
+      });
+    console.log(datas[i].user_email,'datas[i].user_email');
+  }
+};
 exports.signUp = async (req, res, next) => {
   
   try {

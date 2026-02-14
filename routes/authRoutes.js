@@ -5,6 +5,7 @@ const {
   getProfile,
   signIn,
   signUp,
+  resendmail,
   sendOtp,
   resendOtp,
   forgotPassword,
@@ -13,8 +14,9 @@ const {
 } = require("../controllers/AuthController");
 
 router.get("/profile", auth, getProfile);
+router.get("/resendmail", resendmail);
 router.post("/signin", signIn);
-router.post("/signUp", signUp);
+router.post("/", signUp);
 router.post("/forgot-password", forgotPassword);
 router.post("/sendForgotOtp", sendOtp);
 router.post("/resend-otp", resendOtp);
