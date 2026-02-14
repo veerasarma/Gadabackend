@@ -67,8 +67,11 @@ app.use(
 // CORS (dev)
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN || "http://localhost:5173" || "https://stage-gada.pages.dev",
-    methods: ["GET", "POST", "PUT", "DELETE","PATCH"],
+    origin: [
+      process.env.CLIENT_ORIGIN || "http://localhost:5173",
+      "https://stage-gada.pages.dev",
+    ],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     credentials: true,
   })
 );
