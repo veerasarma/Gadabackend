@@ -64,6 +64,13 @@ app.use(
   })
 );
 
+app.use((req, res, next) => {
+  const origin = req.header("Origin"); // or req.headers.origin
+  console.log("Incoming origin:", origin);
+  next();
+});
+
+
 // CORS (dev)
 app.use(
   cors({
