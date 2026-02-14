@@ -86,13 +86,14 @@ app.use(
 
 const allowedOrigins = [
   'https://stage-gada.pages.dev',        // exact frontend origin
+  'https://gada.chat',        // exact frontend origin
   'http://localhost:5173',          // dev
 ];
 
 app.use(
   cors({
     origin(origin, callback) {
-      // console.log(origin,'originoriginorigin');
+      console.log(origin,'originoriginorigin');
       if (!origin) return callback(null, true); // Postman/curl
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
