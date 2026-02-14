@@ -92,7 +92,7 @@ const allowedOrigins = [
 app.use(
   cors({
     origin(origin, callback) {
-      console.log(origin,'originoriginorigin');
+      // console.log(origin,'originoriginorigin');
       if (!origin) return callback(null, true); // Postman/curl
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
