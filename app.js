@@ -64,24 +64,44 @@ app.use(
   })
 );
 
-app.use((req, res, next) => {
-  const origin = req.header("Origin"); // or req.headers.origin
-  console.log("Incoming origin:", origin);
-  next();
-});
+// app.use((req, res, next) => {
+//   const origin = req.header("Origin"); // or req.headers.origin
+//   console.log("Incoming origin:", origin);
+//   next();
+// });
 
 
-// CORS (dev)
+// // CORS (dev)
+// app.use(
+//   cors({
+//     origin: [
+//       process.env.CLIENT_ORIGIN || "http://localhost:5173",
+//       "https://stage-gada.pages.dev",
+//     ],
+//     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+//     credentials: true,
+//   })
+// );
+
+
+const allowedOrigins = [
+  'https://stage-gada.pages.dev"',        // exact frontend origin
+  'http://localhost:5173',          // dev
+];
+
 app.use(
   cors({
-    origin: [
-      process.env.CLIENT_ORIGIN || "http://localhost:5173",
-      "https://stage-gada.pages.dev",
-    ],
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    credentials: true,
+    origin(origin, callback) {
+      if (!origin) return callback(null, true); // Postman/curl
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true, // if you use cookies / Authorization tokens
   })
 );
+
 
 app.use(cookieParser());
 
