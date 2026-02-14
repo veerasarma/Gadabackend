@@ -85,7 +85,7 @@ app.use(
 
 
 const allowedOrigins = [
-  'https://stage-gada.pages.dev"',        // exact frontend origin
+  'https://stage-gada.pages.dev',        // exact frontend origin
   'http://localhost:5173',          // dev
 ];
 
