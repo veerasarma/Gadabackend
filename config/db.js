@@ -7,12 +7,14 @@ const db = mysql.createPool({
   password: process.env.DB_PASS,
   database: process.env.DB_NAME,
   waitForConnections: true,
-  connectionLimit: 25,
+  connectionLimit: 15,
   namedPlaceholders: true,
   queueLimit: 0,            // 0 = unlimited queue
   enableKeepAlive: true,    // mysql2 option
   keepAliveInitialDelay: 0,
 
 });
+
+
 
 module.exports = db;
