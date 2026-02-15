@@ -153,21 +153,21 @@ router.get('/', ensureAuth, async (req, res) => {
       if (offset === 0) {
       // First page - no post_id filter
       [rows] = await pool.promise().query(`
-        SELECT
+      SELECT
   p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
   p.reaction_like_count, p.comments,
   p.boosted, p.boosted_at,
   p.post_type,
   IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
-  u.user_picture AS authorProfileImage, user_subscribed, user_package,
+  u.user_picture AS authorProfileImage, u.user_subscribed, u.user_package,
   TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
   (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
   (
     (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
     (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
   ) AS score
-FROM posts p
-JOIN users u ON u.user_id = p.user_id
+FROM posts AS p
+STRAIGHT_JOIN users AS u ON u.user_id = p.user_id
 WHERE p.is_hidden = '0'
   AND (
     p.boosted <> '1'
@@ -175,8 +175,7 @@ WHERE p.is_hidden = '0'
     OR p.boosted_at < (NOW() - INTERVAL 48 HOUR)
   )
 ORDER BY p.post_id DESC
-LIMIT 
-? 
+LIMIT ? 
       `, [limit]);
       // [rows] = await pool.promise().query(`
       //   SELECT
@@ -227,7 +226,8 @@ LIMIT
     (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
   ) AS score
 FROM posts AS p
-JOIN users AS u ON u.user_id = p.user_id
+STRAIGHT_JOIN users AS u
+  ON u.user_id = p.user_id
 WHERE p.post_id < ?
   AND p.is_hidden = '0'
   AND (
@@ -237,6 +237,7 @@ WHERE p.post_id < ?
   )
 ORDER BY p.post_id DESC
 LIMIT ?;
+
       `, [offset, limit]);
       // [rows] = await pool.promise().query(`
       //   SELECT
