@@ -16,7 +16,7 @@ const {
 router.get("/profile", auth, getProfile);
 router.get("/resendmail", resendmail);
 router.post("/signin", signIn);
-router.post("/", signUp);
+router.post("/signUp", signUp);
 router.post("/forgot-password", forgotPassword);
 router.post("/sendForgotOtp", sendOtp);
 router.post("/resend-otp", resendOtp);
