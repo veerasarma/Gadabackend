@@ -35,38 +35,38 @@ router.post(
     // Check if current date is between 25th and 30th
     const isWithdrawalPeriod = currentDay >= 25 && currentDay <= 30;
 
-    if (!isWithdrawalPeriod) {
-      // Calculate next withdrawal period
-      let nextMonth = currentMonth;
-      let nextYear = currentYear;
+    // if (!isWithdrawalPeriod) {
+    //   // Calculate next withdrawal period
+    //   let nextMonth = currentMonth;
+    //   let nextYear = currentYear;
       
-      if (currentDay > 30) {
-        // If we're past 30th, next period is 25th of next month
-        nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
-        nextYear = currentMonth === 12 ? currentYear + 1 : currentYear;
-      }
+    //   if (currentDay > 30) {
+    //     // If we're past 30th, next period is 25th of next month
+    //     nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+    //     nextYear = currentMonth === 12 ? currentYear + 1 : currentYear;
+    //   }
 
-      const nextWithdrawalStart = new Date(nextYear, nextMonth - 1, 25);
-      const nextWithdrawalEnd = new Date(nextYear, nextMonth - 1, 30);
+    //   const nextWithdrawalStart = new Date(nextYear, nextMonth - 1, 25);
+    //   const nextWithdrawalEnd = new Date(nextYear, nextMonth - 1, 30);
 
-      const formatDate = (date) => {
-        return date.toLocaleDateString('en-US', { 
-          month: 'long', 
-          day: 'numeric', 
-          year: 'numeric' 
-        });
-      };
+    //   const formatDate = (date) => {
+    //     return date.toLocaleDateString('en-US', { 
+    //       month: 'long', 
+    //       day: 'numeric', 
+    //       year: 'numeric' 
+    //     });
+    //   };
 
-      return res.status(403).json({
-        error: "Withdrawal portal is closed",
-        message: "The withdrawal portal opens every 25th to 30th of every month.",
-        nextWithdrawalPeriod: {
-          start: formatDate(nextWithdrawalStart),
-          end: formatDate(nextWithdrawalEnd)
-        },
-        currentDate: formatDate(now)
-      });
-    }
+    //   return res.status(403).json({
+    //     error: "Withdrawal portal is closed",
+    //     message: "The withdrawal portal opens every 25th to 30th of every month.",
+    //     nextWithdrawalPeriod: {
+    //       start: formatDate(nextWithdrawalStart),
+    //       end: formatDate(nextWithdrawalEnd)
+    //     },
+    //     currentDate: formatDate(now)
+    //   });
+    // }
 
     const userId = Number(req.user.userId);
     const { amount, method, transferTo } = req.body;
@@ -202,6 +202,48 @@ router.get("/admin", ensureAuth, requireAdmin,async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Failed to fetch withdrawal requests" });
+  }
+});
+
+router.post("/:id/cancel", ensureAuth,requireAdmin, async (req, res) => {
+//   if (!isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+  const id = Number(req.params.id);
+  const conn = await pool.getConnection();
+  const userId = Number(req.user.userId);
+  try {
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query(
+      "SELECT payment_id, status,amount FROM wallet_payments WHERE payment_id = ? FOR UPDATE",
+      [id]
+    );
+    const row = rows[0];
+    if (!row) throw new Error("Not found");
+    if (row.status !== 0) throw new Error("Already processed");
+
+    await conn.query("UPDATE wallet_payments SET status = 2 WHERE payment_id = ?", [id]);
+
+     const [u] = await conn.query(
+        "SELECT user_wallet_balance FROM users WHERE user_id = ? FOR UPDATE",
+        [userId]
+      );
+      const balance = Number(u[0]?.user_wallet_balance ?? 0);
+      const amt = Number(row.amount);
+
+      await conn.query(
+        "UPDATE users SET user_wallet_balance = user_wallet_balance + ? WHERE user_id = ?",
+        [amt, userId]
+      );
+
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (e) {
+    try { await conn.rollback(); } catch {}
+    console.error(e);
+    res.status(400).json({ error: e.message || "Failed to cancel" });
+  } finally {
+    conn.release();
   }
 });
 
