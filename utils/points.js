@@ -231,11 +231,11 @@ async function creditPoints({
     const currentPoints = Number(userRows[0]?.user_points || 0);
 
     // Insert history (log_points)
-    await conn.query(
-      `INSERT INTO log_points (user_id, node_id, node_type, points, time)
-       VALUES (?, ?, ?, ?, NOW())`,
-      [userId, nodeId, normalizedType, toAward]
-    );
+    // await conn.query(
+    //   `INSERT INTO log_points (user_id, node_id, node_type, points, time)
+    //    VALUES (?, ?, ?, ?, NOW())`,
+    //   [userId, nodeId, normalizedType, toAward]
+    // );
 
     // Update user_points
     await conn.query(

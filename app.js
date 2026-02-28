@@ -50,6 +50,10 @@ const pagesRoutes = require("./routes/pages");
 const eventsRoutes = require("./routes/events");
 const watchRoutes = require("./routes/watch");
 const walletRoutes = require("./routes/walletWithdrawals");
+const tagsRoutes = require('./routes/tags');
+
+const followRoutes = require('./routes/follow');
+
 
 const app = express();
 
@@ -206,6 +210,9 @@ app.use("/api/admin/ads", require("./routes/admin/admin.ads.routes"));
 app.use("/api/admin/adssettings", require("./routes/admin/admin.ads.settings"));
 app.use('/api/live', require('./routes/live'));
 app.use("/api/ads", require("./routes/ads.routes"));
+app.use('/api/tags', tagsRoutes);
+app.use('/api/follow', followRoutes);
+
 
 
 

@@ -116,16 +116,345 @@ async function handleSingleView({ req, postId, viewerId }) {
   }
 }
 
+// router.get('/', ensureAuth, async (req, res) => {
+//   try {
+//     const userId = Number(req.user?.userId || 0);
+//     const withPromoted = String(req.query.withPromoted || '0') === '1';
+
+//     const limit = Math.min(50, parseInt(req.query.limit) || 20);
+//     const offset = parseInt(req.query.offset) || 0;
+
+//     // A) boosted pool
+//     const [boostedRows] = await pool.promise().query(`
+//       SELECT
+//         p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+//         p.reaction_like_count, p.comments,
+//         p.boosted, p.boosted_at,
+//         p.post_type,
+//         IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+//         u.user_picture AS authorProfileImage, user_subscribed, user_package
+//       FROM posts p
+//       JOIN users u ON u.user_id = p.user_id
+//       WHERE p.is_hidden = '0'
+//         AND p.boosted = '1'
+//       ORDER BY p.post_id DESC
+//       LIMIT 50
+//     `);
+
+//     // Pick ONE boosted at random
+//     let promoted = null;
+//     if (boostedRows.length > 0) {
+//       promoted = boostedRows[Math.floor(Math.random() * boostedRows.length)];
+//     }
+
+//     // B) main feed
+//     let rows;
+//     if (offset === 0) {
+//       [rows] = await pool.promise().query(`
+//         SELECT
+//           p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+//           p.reaction_like_count, p.comments,
+//           p.boosted, p.boosted_at,
+//           p.post_type,
+//           IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+//           u.user_picture AS authorProfileImage, u.user_subscribed, u.user_package,
+//           TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
+//           (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
+//           (
+//             (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
+//             (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
+//           ) AS score
+//         FROM posts AS p
+//         STRAIGHT_JOIN users AS u ON u.user_id = p.user_id
+//         WHERE p.is_hidden = '0'
+//           AND (
+//             p.boosted <> '1'
+//             OR p.boosted_at IS NULL
+//             OR p.boosted_at < (NOW() - INTERVAL 48 HOUR)
+//           )
+//         ORDER BY p.post_id DESC
+//         LIMIT ?
+//       `, [limit]);
+//     } else {
+//       [rows] = await pool.promise().query(`
+//         SELECT
+//           p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+//           p.reaction_like_count, p.comments,
+//           p.boosted, p.boosted_at,
+//           p.post_type,
+//           IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+//           u.user_picture AS authorProfileImage,
+//           u.user_subscribed,
+//           u.user_package,
+//           TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
+//           (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
+//           (
+//             (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
+//             (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
+//           ) AS score
+//         FROM posts AS p
+//         STRAIGHT_JOIN users AS u ON u.user_id = p.user_id
+//         WHERE p.post_id < ?
+//           AND p.is_hidden = '0'
+//           AND (
+//             p.boosted <> '1'
+//             OR p.boosted_at IS NULL
+//             OR p.boosted_at < (NOW() - INTERVAL 48 HOUR)
+//           )
+//         ORDER BY p.post_id DESC
+//         LIMIT ?
+//       `, [offset, limit]);
+//     }
+
+//     if (!rows.length && !promoted) {
+//       return withPromoted ? res.json({ promoted: null, items: [] }) : res.json([]);
+//     }
+
+//     // Collect post IDs
+//     const postIds = rows.map(p => p.post_id);
+//     if (promoted) postIds.push(promoted.post_id);
+
+//     // Collect LIVE post IDs
+//     const livePostIds = new Set(
+//       rows.filter(p => String(p.post_type).toLowerCase() === 'live').map(p => p.post_id)
+//     );
+//     if (promoted && String(promoted.post_type).toLowerCase() === 'live') {
+//       livePostIds.add(promoted.post_id);
+//     }
+
+//     // Fetch related data in parallel (ADDED TAGS QUERY)
+//     const [
+//       mediaRows, videoRows, photoRows, likeRows, commentRows,
+//       reactAggRows, myReactRows,
+//       viewAggRows, viewMineRows,
+//       liveThumbRows,
+//       tagsRows  // NEW: Fetch all tags
+//     ] = await Promise.all([
+//       pool.promise().query(
+//         `SELECT post_id, source_url, source_type FROM posts_media WHERE post_id IN (?)`, 
+//         [postIds]
+//       ).then(([r]) => r),
+
+//       pool.promise().query(
+//         `SELECT post_id, source FROM posts_videos WHERE post_id IN (?)`, 
+//         [postIds]
+//       ).then(([r]) => r),
+
+//       pool.promise().query(
+//         `SELECT post_id, album_id, source FROM posts_photos WHERE post_id IN (?)`, 
+//         [postIds]
+//       ).then(([r]) => r),
+
+//       pool.promise().query(
+//         `SELECT r.post_id, r.user_id, u.user_name
+//          FROM posts_reactions r
+//          JOIN users u ON u.user_id = r.user_id
+//          WHERE r.post_id IN (?) AND r.reaction = 'like'`, 
+//         [postIds]
+//       ).then(([r]) => r),
+
+//       pool.promise().query(
+//         `SELECT c.comment_id, c.node_id AS post_id, c.user_id, c.text, c.time,
+//                 u.user_name, u.user_picture AS profileImage
+//          FROM posts_comments c
+//          JOIN users u ON u.user_id = c.user_id
+//          WHERE c.node_type = 'post' AND c.node_id IN (?)
+//          ORDER BY c.time ASC`, 
+//         [postIds]
+//       ).then(([r]) => r),
+
+//       pool.promise().query(
+//         `SELECT post_id, reaction, COUNT(*) AS c
+//          FROM posts_reactions
+//          WHERE post_id IN (?)
+//          GROUP BY post_id, reaction`, 
+//         [postIds]
+//       ).then(([r]) => r),
+
+//       pool.promise().query(
+//         `SELECT post_id, reaction
+//          FROM posts_reactions
+//          WHERE post_id IN (?) AND user_id = ?`, 
+//         [postIds, userId || -1]
+//       ).then(([r]) => r),
+
+//       pool.promise().query(
+//         `SELECT post_id, COUNT(*) AS views
+//          FROM posts_views
+//          WHERE post_id IN (?)
+//          GROUP BY post_id`, 
+//         [postIds]
+//       ).then(([r]) => r),
+
+//       pool.promise().query(
+//         `SELECT post_id
+//          FROM posts_views
+//          WHERE post_id IN (?) AND user_id = ?`, 
+//         [postIds, userId || -1]
+//       ).then(([r]) => r),
+
+//       (livePostIds.size
+//         ? pool.promise().query(
+//             `SELECT pl.post_id, pl.video_thumbnail
+//              FROM posts_live pl
+//              WHERE pl.post_id IN (?)
+//              ORDER BY pl.live_id DESC`,
+//             [[...livePostIds]]
+//           ).then(([r]) => r)
+//         : Promise.resolve([])
+//       ),
+
+//       // NEW: Fetch all tags for these posts in ONE query
+//       pool.promise().query(
+//         `SELECT 
+//           pt.post_id,
+//           pt.tag_id,
+//           pt.user_id,
+//           u.user_name,
+//           u.user_firstname,
+//           u.user_lastname,
+//           u.user_picture,
+//           u.user_verified
+//          FROM posts_tags pt
+//          JOIN users u ON pt.user_id = u.user_id
+//          WHERE pt.post_id IN (?) AND pt.tag_status = 'approved'
+//          ORDER BY pt.created_at ASC`,
+//         [postIds]
+//       ).then(([r]) => r),
+//     ]);
+
+//     // Stitch posts
+//     const byId = new Map(rows.map(p => [p.post_id, mapPostRow(p)]));
+//     if (promoted && !byId.has(promoted.post_id)) {
+//       byId.set(promoted.post_id, mapPostRow(promoted));
+//     }
+
+//     for (const m of mediaRows) {
+//       if (m.source_type === 'image') byId.get(m.post_id)?.images.push(m.source_url);
+//     }
+//     for (const ph of photoRows) byId.get(ph.post_id)?.images.push(ph.source);
+//     for (const v of videoRows) byId.get(v.post_id)?.videos.push(v.source);
+
+//     // Inject LIVE thumbnails
+//     const pushedLive = new Set();
+//     for (const lt of liveThumbRows) {
+//       const post = byId.get(lt.post_id);
+//       const thumb = lt.video_thumbnail && String(lt.video_thumbnail).trim();
+//       if (post && thumb && !pushedLive.has(lt.post_id)) {
+//         if (Array.isArray(post.images)) {
+//           if (!post.images.includes(thumb)) post.images.unshift(thumb);
+//         } else {
+//           post.images = [thumb];
+//         }
+//         pushedLive.add(lt.post_id);
+//       }
+//     }
+
+//     // Likes
+//     for (const l of likeRows) {
+//       byId.get(l.post_id)?.likes.push({ userId: String(l.user_id), username: l.user_name });
+//     }
+
+//     // Comments
+//     for (const c of commentRows) {
+//       const post = byId.get(c.post_id);
+//       if (post) {
+//         post.comments.push({
+//           id: String(c.comment_id),
+//           userId: String(c.user_id),
+//           username: c.user_name,
+//           profileImage: c.profileImage || null,
+//           content: c.text,
+//           createdAt: c.time,
+//         });
+//       }
+//     }
+
+//     // Reactions
+//     const rxAggMap = new Map();
+//     for (const r of reactAggRows) {
+//       const arr = rxAggMap.get(r.post_id) || [];
+//       arr.push({ reaction: r.reaction, c: Number(r.c || 0) });
+//       rxAggMap.set(r.post_id, arr);
+//     }
+//     const myRxMap = new Map();
+//     for (const r of myReactRows) {
+//       myRxMap.set(r.post_id, r.reaction);
+//     }
+
+//     // Views
+//     const viewsById = new Map();
+//     for (const v of viewAggRows) {
+//       viewsById.set(Number(v.post_id), Number(v.views || 0));
+//     }
+//     const viewedSet = new Set(viewMineRows.map(v => Number(v.post_id)));
+
+//     // NEW: Group tags by post_id
+//     const tagsByPost = new Map();
+//     for (const tag of tagsRows) {
+//       if (!tagsByPost.has(tag.post_id)) {
+//         tagsByPost.set(tag.post_id, []);
+//       }
+//       tagsByPost.get(tag.post_id).push({
+//         tag_id: tag.tag_id,
+//         user_id: tag.user_id,
+//         user_name: tag.user_name,
+//         user_firstname: tag.user_firstname,
+//         user_lastname: tag.user_lastname,
+//         user_picture: tag.user_picture,
+//         user_verified: tag.user_verified
+//       });
+//     }
+
+//     // Attach all data to posts
+//     for (const postId of postIds) {
+//       handleSingleView({ req, postId, viewerId: userId });
+
+//       const post = byId.get(postId);
+//       if (!post) continue;
+
+//       // Reactions
+//       post.reactions = rxAggMap.get(postId) || [];
+//       post.myReaction = myRxMap.get(postId) || null;
+
+//       // Backward-compat counters
+//       const summed = post.reactions.reduce((sum, r) => sum + Number(r.c || 0), 0);
+//       post.likesCount = summed > 0 ? summed : (Array.isArray(post.likes) ? post.likes.length : 0);
+//       post.hasLiked = Boolean(post.myReaction) ||
+//                       (Array.isArray(post.likes) && post.likes.some(l => Number(l.userId) === userId));
+
+//       // Views
+//       post.views = viewsById.get(postId) || 0;
+//       post.hasViewed = viewedSet.has(Number(postId));
+
+//       // NEW: Attach tags
+//       post.tags = tagsByPost.get(postId) || [];
+//     }
+
+//     // Output
+//     if (withPromoted) {
+//       const promotedOut = promoted ? byId.get(promoted.post_id) : null;
+//       const itemsOut = rows.map(p => byId.get(p.post_id));
+//       return res.json({ promoted: promotedOut, items: itemsOut });
+//     } else {
+//       return res.json(rows.map(p => byId.get(p.post_id)));
+//     }
+//   } catch (err) {
+//     console.error('[GET /posts]', err);
+//     res.status(500).json({ error: 'Failed to fetch posts' });
+//   }
+// });
+
 router.get('/', ensureAuth, async (req, res) => {
   try {
-    const userId = Number(req.user?.userId || 0);           // for myReaction / hasViewed
+    const userId = Number(req.user?.userId || 0);
     const withPromoted = String(req.query.withPromoted || '0') === '1';
+    const PROMOTED_COUNT = 5; // Number of promoted posts per page
 
     const limit = Math.min(50, parseInt(req.query.limit) || 20);
-  const offset = parseInt(req.query.offset) || 0;
+    const offset = parseInt(req.query.offset) || 0;
 
-
-    // A) boosted pool (we'll still pick randomly from recent boosted)
+    // A) boosted pool - fetch more to have variety
     const [boostedRows] = await pool.promise().query(`
       SELECT
         p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
@@ -138,240 +467,203 @@ router.get('/', ensureAuth, async (req, res) => {
       JOIN users u ON u.user_id = p.user_id
       WHERE p.is_hidden = '0'
         AND p.boosted = '1'
-      ORDER BY p.post_id DESC
-      LIMIT 50
+      ORDER BY RAND()
+      LIMIT 100
     `);
 
-    // Pick ONE boosted at random (if any)
-    let promoted = null;
+    // Pick MULTIPLE promoted posts randomly
+    let promotedPosts = [];
     if (boostedRows.length > 0) {
-      promoted = boostedRows[Math.floor(Math.random() * boostedRows.length)];
+      // Shuffle and pick up to PROMOTED_COUNT
+      const shuffled = [...boostedRows].sort(() => Math.random() - 0.5);
+      promotedPosts = shuffled.slice(0, Math.min(PROMOTED_COUNT, shuffled.length));
     }
 
-    // B) main feed (exclude boosted-in-window in ranking)
+    // B) main feed
     let rows;
-      if (offset === 0) {
-      // First page - no post_id filter
+    if (offset === 0) {
       [rows] = await pool.promise().query(`
-      SELECT
-  p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
-  p.reaction_like_count, p.comments,
-  p.boosted, p.boosted_at,
-  p.post_type,
-  IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
-  u.user_picture AS authorProfileImage, u.user_subscribed, u.user_package,
-  TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
-  (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
-  (
-    (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
-    (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
-  ) AS score
-FROM posts AS p
-STRAIGHT_JOIN users AS u ON u.user_id = p.user_id
-WHERE p.is_hidden = '0'
-  AND (
-    p.boosted <> '1'
-    OR p.boosted_at IS NULL
-    OR p.boosted_at < (NOW() - INTERVAL 48 HOUR)
-  )
-ORDER BY p.post_id DESC
-LIMIT ? 
+        SELECT
+          p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+          p.reaction_like_count, p.comments,
+          p.boosted, p.boosted_at,
+          p.post_type,
+          IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+          u.user_picture AS authorProfileImage, u.user_subscribed, u.user_package,
+          TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
+          (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
+          (
+            (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
+            (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
+          ) AS score
+        FROM posts AS p
+        STRAIGHT_JOIN users AS u ON u.user_id = p.user_id
+        WHERE p.is_hidden = '0'
+          AND (
+            p.boosted <> '1'
+            OR p.boosted_at IS NULL
+            OR p.boosted_at < (NOW() - INTERVAL 48 HOUR)
+          )
+        ORDER BY p.post_id DESC
+        LIMIT ?
       `, [limit]);
-      // [rows] = await pool.promise().query(`
-      //   SELECT
-      //     p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
-      //     p.reaction_like_count, p.comments,
-      //     p.boosted, p.boosted_at,
-      //     p.post_type,
-      //     IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
-      //     u.user_picture AS authorProfileImage, user_subscribed,user_package,
-      //     TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
-      //     (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
-      //     (
-      //       (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
-      //       (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
-      //     ) AS score
-      //   FROM posts p
-      //   JOIN users u ON u.user_id = p.user_id
-      //   WHERE p.is_hidden = '0'
-      //     AND NOT (
-      //       p.boosted = '1' AND p.boosted_at IS NOT NULL
-      //       AND p.boosted_at >= (NOW() - INTERVAL 48 HOUR)
-      //     )
-      //   ORDER BY post_id DESC
-      //   LIMIT ? 
-      // `, [limit]);
     } else {
-      // Subsequent pages - use offset as last_post_id cursor
       [rows] = await pool.promise().query(`
-      SELECT
-  p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
-  p.reaction_like_count, p.comments,
-  p.boosted, p.boosted_at,
-  p.post_type,
-  IFNULL(
-    NULLIF(
-      TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)),
-      ''
-    ),
-    u.user_name
-  ) AS authorUsername,
-  u.user_picture AS authorProfileImage,
-  u.user_subscribed,
-  u.user_package,
-  TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
-  (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
-  (
-    (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
-    (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
-  ) AS score
-FROM posts AS p
-STRAIGHT_JOIN users AS u
-  ON u.user_id = p.user_id
-WHERE p.post_id < ?
-  AND p.is_hidden = '0'
-  AND (
-    p.boosted <> '1'
-    OR p.boosted_at IS NULL
-    OR p.boosted_at < (NOW() - INTERVAL 48 HOUR)
-  )
-ORDER BY p.post_id DESC
-LIMIT ?;
-
+        SELECT
+          p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
+          p.reaction_like_count, p.comments,
+          p.boosted, p.boosted_at,
+          p.post_type,
+          IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+          u.user_picture AS authorProfileImage,
+          u.user_subscribed,
+          u.user_package,
+          TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
+          (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
+          (
+            (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
+            (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
+          ) AS score
+        FROM posts AS p
+        STRAIGHT_JOIN users AS u ON u.user_id = p.user_id
+        WHERE p.post_id < ?
+          AND p.is_hidden = '0'
+          AND (
+            p.boosted <> '1'
+            OR p.boosted_at IS NULL
+            OR p.boosted_at < (NOW() - INTERVAL 48 HOUR)
+          )
+        ORDER BY p.post_id DESC
+        LIMIT ?
       `, [offset, limit]);
-      // [rows] = await pool.promise().query(`
-      //   SELECT
-      //     p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
-      //     p.reaction_like_count, p.comments,
-      //     p.boosted, p.boosted_at,
-      //     p.post_type,
-      //     IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
-      //     u.user_picture AS authorProfileImage, user_subscribed,user_package,
-      //     TIMESTAMPDIFF(MINUTE, p.time, NOW()) AS age_min,
-      //     (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5) AS engagement_raw,
-      //     (
-      //       (-0.002 * TIMESTAMPDIFF(MINUTE, p.time, NOW())) +
-      //       (LOG(1 + (p.reaction_like_count*0.5 + p.comments*1.0 + p.shares*1.5)))
-      //     ) AS score
-      //   FROM posts p
-      //   JOIN users u ON u.user_id = p.user_id
-      //   WHERE p.post_id < ? AND p.is_hidden = '0'
-      //     AND NOT (
-      //       p.boosted = '1' AND p.boosted_at IS NOT NULL
-      //       AND p.boosted_at >= (NOW() - INTERVAL 48 HOUR)
-      //     )
-      //   ORDER BY post_id DESC
-      //   LIMIT ? 
-      // `, [offset, limit]);
     }
 
-
-    // If nothing at all, return empty in either format
-    if (!rows.length && !promoted) {
-      return withPromoted ? res.json({ promoted: null, items: [] }) : res.json([]);
+    if (!rows.length && promotedPosts.length === 0) {
+      return withPromoted ? res.json({ promoted: [], items: [] }) : res.json([]);
     }
 
-    // Collect ids for stitching (include promoted if present)
+    // Collect post IDs (include all promoted posts)
     const postIds = rows.map(p => p.post_id);
-    if (promoted) postIds.push(promoted.post_id);
+    for (const promo of promotedPosts) {
+      postIds.push(promo.post_id);
+    }
 
-    // Collect LIVE post IDs to fetch thumbnails from posts_live
+    // Collect LIVE post IDs
     const livePostIds = new Set(
       rows.filter(p => String(p.post_type).toLowerCase() === 'live').map(p => p.post_id)
     );
-    if (promoted && String(promoted.post_type).toLowerCase() === 'live') {
-      livePostIds.add(promoted.post_id);
+    for (const promo of promotedPosts) {
+      if (String(promo.post_type).toLowerCase() === 'live') {
+        livePostIds.add(promo.post_id);
+      }
     }
 
-    // 2–? ) fetch related in parallel (ADDED queries for VIEWS + LIVE THUMBS)
+    // Fetch related data in parallel
     const [
       mediaRows, videoRows, photoRows, likeRows, commentRows,
       reactAggRows, myReactRows,
       viewAggRows, viewMineRows,
-      liveThumbRows
+      liveThumbRows,
+      tagsRows
     ] = await Promise.all([
       pool.promise().query(
-        `SELECT post_id, source_url, source_type
-           FROM posts_media
-          WHERE post_id IN (?)`, [postIds]
+        `SELECT post_id, source_url, source_type FROM posts_media WHERE post_id IN (?)`, 
+        [postIds]
       ).then(([r]) => r),
 
       pool.promise().query(
-        `SELECT post_id, source
-           FROM posts_videos
-          WHERE post_id IN (?)`, [postIds]
+        `SELECT post_id, source FROM posts_videos WHERE post_id IN (?)`, 
+        [postIds]
       ).then(([r]) => r),
 
       pool.promise().query(
-        `SELECT post_id, album_id, source
-           FROM posts_photos
-          WHERE post_id IN (?)`, [postIds]
+        `SELECT post_id, album_id, source FROM posts_photos WHERE post_id IN (?)`, 
+        [postIds]
       ).then(([r]) => r),
 
-      // existing "likes" fetch (for backward compat / older UI):
       pool.promise().query(
         `SELECT r.post_id, r.user_id, u.user_name
-           FROM posts_reactions r
-           JOIN users u ON u.user_id = r.user_id
-          WHERE r.post_id IN (?) AND r.reaction = 'like'`, [postIds]
+         FROM posts_reactions r
+         JOIN users u ON u.user_id = r.user_id
+         WHERE r.post_id IN (?) AND r.reaction = 'like'`, 
+        [postIds]
       ).then(([r]) => r),
 
       pool.promise().query(
         `SELECT c.comment_id, c.node_id AS post_id, c.user_id, c.text, c.time,
                 u.user_name, u.user_picture AS profileImage
-           FROM posts_comments c
-           JOIN users u ON u.user_id = c.user_id
-          WHERE c.node_type = 'post' AND c.node_id IN (?)
-          ORDER BY c.time ASC`, [postIds]
+         FROM posts_comments c
+         JOIN users u ON u.user_id = c.user_id
+         WHERE c.node_type = 'post' AND c.node_id IN (?)
+         ORDER BY c.time ASC`, 
+        [postIds]
       ).then(([r]) => r),
 
-      // aggregated reactions per post (all types)
       pool.promise().query(
         `SELECT post_id, reaction, COUNT(*) AS c
-           FROM posts_reactions
-          WHERE post_id IN (?)
-          GROUP BY post_id, reaction`, [postIds]
+         FROM posts_reactions
+         WHERE post_id IN (?)
+         GROUP BY post_id, reaction`, 
+        [postIds]
       ).then(([r]) => r),
 
-      // the current viewer's reaction per post
       pool.promise().query(
         `SELECT post_id, reaction
-           FROM posts_reactions
-          WHERE post_id IN (?) AND user_id = ?`, [postIds, userId || -1]
+         FROM posts_reactions
+         WHERE post_id IN (?) AND user_id = ?`, 
+        [postIds, userId || -1]
       ).then(([r]) => r),
 
-      // total views per post
       pool.promise().query(
         `SELECT post_id, COUNT(*) AS views
-           FROM posts_views
-          WHERE post_id IN (?)
-          GROUP BY post_id`, [postIds]
+         FROM posts_views
+         WHERE post_id IN (?)
+         GROUP BY post_id`, 
+        [postIds]
       ).then(([r]) => r),
 
-      // which posts the current user has viewed
       pool.promise().query(
         `SELECT post_id
-           FROM posts_views
-          WHERE post_id IN (?) AND user_id = ?`, [postIds, userId || -1]
+         FROM posts_views
+         WHERE post_id IN (?) AND user_id = ?`, 
+        [postIds, userId || -1]
       ).then(([r]) => r),
 
-      // LIVE thumbnails: latest active live row per post (only for live posts)
       (livePostIds.size
         ? pool.promise().query(
             `SELECT pl.post_id, pl.video_thumbnail
-               FROM posts_live pl
-              WHERE pl.post_id IN (?)
-              ORDER BY pl.live_id DESC`,
+             FROM posts_live pl
+             WHERE pl.post_id IN (?)
+             ORDER BY pl.live_id DESC`,
             [[...livePostIds]]
           ).then(([r]) => r)
         : Promise.resolve([])
       ),
+
+      pool.promise().query(
+        `SELECT 
+          pt.post_id,
+          pt.tag_id,
+          pt.user_id,
+          u.user_name,
+          u.user_firstname,
+          u.user_lastname,
+          u.user_picture,
+          u.user_verified
+         FROM posts_tags pt
+         JOIN users u ON pt.user_id = u.user_id
+         WHERE pt.post_id IN (?) AND pt.tag_status = 'approved'
+         ORDER BY pt.created_at ASC`,
+        [postIds]
+      ).then(([r]) => r),
     ]);
 
-    // 8) stitch (preserve helpers, but keep boosted flags!)
+    // Stitch posts - include all promoted posts
     const byId = new Map(rows.map(p => [p.post_id, mapPostRow(p)]));
-    if (promoted && !byId.has(promoted.post_id)) {
-      byId.set(promoted.post_id, mapPostRow(promoted));
+    for (const promo of promotedPosts) {
+      if (!byId.has(promo.post_id)) {
+        byId.set(promo.post_id, mapPostRow(promo));
+      }
     }
 
     for (const m of mediaRows) {
@@ -380,16 +672,13 @@ LIMIT ?;
     for (const ph of photoRows) byId.get(ph.post_id)?.images.push(ph.source);
     for (const v of videoRows) byId.get(v.post_id)?.videos.push(v.source);
 
-    // Inject LIVE thumbnails at the front of images array
-    // (only if a thumbnail exists; avoids duplicates)
+    // Inject LIVE thumbnails
     const pushedLive = new Set();
     for (const lt of liveThumbRows) {
       const post = byId.get(lt.post_id);
       const thumb = lt.video_thumbnail && String(lt.video_thumbnail).trim();
       if (post && thumb && !pushedLive.has(lt.post_id)) {
-        // Put it first so UI uses it as the primary media thumbnail
         if (Array.isArray(post.images)) {
-          // avoid duplicates if already present
           if (!post.images.includes(thumb)) post.images.unshift(thumb);
         } else {
           post.images = [thumb];
@@ -398,11 +687,12 @@ LIMIT ?;
       }
     }
 
-    // existing likes list (kept for backward compatibility)
+    // Likes
     for (const l of likeRows) {
       byId.get(l.post_id)?.likes.push({ userId: String(l.user_id), username: l.user_name });
     }
 
+    // Comments
     for (const c of commentRows) {
       const post = byId.get(c.post_id);
       if (post) {
@@ -417,7 +707,7 @@ LIMIT ?;
       }
     }
 
-    // ---- reactions aggregation + my reaction ----
+    // Reactions
     const rxAggMap = new Map();
     for (const r of reactAggRows) {
       const arr = rxAggMap.get(r.post_id) || [];
@@ -429,39 +719,54 @@ LIMIT ?;
       myRxMap.set(r.post_id, r.reaction);
     }
 
-    // ---- views totals + did current user view ----
+    // Views
     const viewsById = new Map();
     for (const v of viewAggRows) {
       viewsById.set(Number(v.post_id), Number(v.views || 0));
     }
     const viewedSet = new Set(viewMineRows.map(v => Number(v.post_id)));
 
-    for (const postId of postIds) {
+    // Group tags by post_id
+    const tagsByPost = new Map();
+    for (const tag of tagsRows) {
+      if (!tagsByPost.has(tag.post_id)) {
+        tagsByPost.set(tag.post_id, []);
+      }
+      tagsByPost.get(tag.post_id).push({
+        tag_id: tag.tag_id,
+        user_id: tag.user_id,
+        user_name: tag.user_name,
+        user_firstname: tag.user_firstname,
+        user_lastname: tag.user_lastname,
+        user_picture: tag.user_picture,
+        user_verified: tag.user_verified
+      });
+    }
 
+    // Attach all data to posts
+    for (const postId of postIds) {
       handleSingleView({ req, postId, viewerId: userId });
 
       const post = byId.get(postId);
       if (!post) continue;
 
-      // reactions
-      post.reactions  = rxAggMap.get(postId) || [];
+      post.reactions = rxAggMap.get(postId) || [];
       post.myReaction = myRxMap.get(postId) || null;
 
-      // Backward-compat counters
       const summed = post.reactions.reduce((sum, r) => sum + Number(r.c || 0), 0);
       post.likesCount = summed > 0 ? summed : (Array.isArray(post.likes) ? post.likes.length : 0);
-      post.hasLiked   = Boolean(post.myReaction) ||
-                        (Array.isArray(post.likes) && post.likes.some(l => Number(l.userId) === userId));
+      post.hasLiked = Boolean(post.myReaction) ||
+                      (Array.isArray(post.likes) && post.likes.some(l => Number(l.userId) === userId));
 
-      // NEW: views
-      post.views     = viewsById.get(postId) || 0;                 // total views
-      post.hasViewed = viewedSet.has(Number(postId));              // current user viewed?
+      post.views = viewsById.get(postId) || 0;
+      post.hasViewed = viewedSet.has(Number(postId));
+      post.tags = tagsByPost.get(postId) || [];
     }
 
-    // Output
+    // Output - return multiple promoted posts
     if (withPromoted) {
-      const promotedOut = promoted ? byId.get(promoted.post_id) : null;
-      const itemsOut = rows.map(p => byId.get(p.post_id)); // keep ranking order
+      const promotedOut = promotedPosts.map(p => byId.get(p.post_id)).filter(Boolean);
+      const itemsOut = rows.map(p => byId.get(p.post_id));
       return res.json({ promoted: promotedOut, items: itemsOut });
     } else {
       return res.json(rows.map(p => byId.get(p.post_id)));
@@ -471,6 +776,8 @@ LIMIT ?;
     res.status(500).json({ error: 'Failed to fetch posts' });
   }
 });
+
+
 
 router.get("/getreactions", ensureAuth, async (_req, res) => {
   try {
@@ -890,69 +1197,117 @@ function countWords(str) {
   return str.trim().split(/\s+/).length;
 }
 
-
 router.post(
-  '/',
+  "/",
   ensureAuth,
-  body('content').optional({ nullable: true }).isString(),
-  body('media').isArray().optional(),
+  body("content").optional({ nullable: true }).isString(),
+  body("media").isArray().optional(),
+  body("taggedUsers").optional().isArray(), // NEW: Accept tagged users
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty())
-      return res.status(400).json({ errors: errors.array() });
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { userId, content, media = [],text='' } = req.body;
-    
+    const { userId, content, media, text, taggedUsers } = req.body; // NEW: get taggedUsers
     const hasMedia = media && media.length > 0;
     const wordCount = countWords(content);
-    if(!hasMedia && wordCount < 400)
-    {
-      return res.status(403).json({ error: 'Without media upload not allowed to create post ' });
+
+    if (!hasMedia && wordCount < 400) {
+      return res.status(403).json({ error: "Without media upload not allowed to create post" });
     }
 
-    // only author can create for themselves
     if (String(userId) !== String(req.user.userId)) {
-      return res.status(403).json({ error: 'Forbidden' });
+      return res.status(403).json({ error: "Forbidden" });
     }
 
-    let post_type = (text=='live' || text=='Live')?'live':'status';
-  
-    
+    let posttype = "text";
     const conn = await pool.promise().getConnection();
+    
     try {
       await conn.beginTransaction();
 
-      // 1) Insert post
-      const [r] = await conn.execute( 
-        `INSERT INTO posts
-           (user_id, user_type, post_type, time, privacy, text, is_hidden, in_group, in_event, in_wall,
-            reaction_like_count, comments, shares)
-         VALUES (?, 'user', ?, NOW(), 'public', ?, '0', '0', '0', '0', 0, 0, 0)`,
-        [userId, post_type,content || null]
+      // 1. Insert post
+      const [r] = await conn.execute(
+        `INSERT INTO posts (user_id, user_type, post_type, time, privacy, text, is_hidden, 
+         in_group, in_event, in_wall, reaction_like_count, comments, shares, has_tags, tags_count) 
+         VALUES (?, 'user', ?, NOW(), 'public', ?, '0', '0', '0', '0', 0, 0, 0, ?, ?)`,
+        [
+          userId, 
+          posttype, 
+          content || null,
+          taggedUsers && taggedUsers.length > 0 ? '1' : '0', // has_tags
+          taggedUsers ? taggedUsers.length : 0 // tags_count
+        ]
       );
       const postId = r.insertId;
 
-      // 2) Attach media (images/videos)
-      for (const m of media) {
+      // 2. Attach media
+      for (const m of media || []) {
         if (!m?.url || !m?.type) continue;
-        if (m.type === 'image') {
+        if (m.type === "image") {
           await conn.execute(
-            `INSERT INTO posts_media (post_id, source_url, source_provider, source_type)
+            `INSERT INTO posts_media (post_id, source_url, source_provider, source_type) 
              VALUES (?, ?, 'upload', 'image')`,
             [postId, m.url]
           );
-        } else if (m.type === 'video') {
+        } else if (m.type === "video") {
           await conn.execute(
-            `INSERT INTO posts_videos (post_id, category_id, source)
-             VALUES (?, 1, ?)`,
+            `INSERT INTO posts_videos (post_id, category_id, source) VALUES (?, 1, ?)`,
             [postId, m.url]
           );
         }
       }
 
-      // 3) Hashtags: extract from content, upsert, link to post
+      // 3. NEW: Process tags
+      if (taggedUsers && Array.isArray(taggedUsers) && taggedUsers.length > 0) {
+        const tagValues = [];
+        const notificationPromises = [];
+
+        for (const taggedUserId of taggedUsers) {
+          const uid = Number(taggedUserId);
+          if (!uid) continue;
+
+          // Check user exists and get their tag settings
+          const [user] = await conn.query(
+            `SELECT user_id, user_tag_review, user_banned, user_activated 
+             FROM users WHERE user_id = ?`,
+            [uid]
+          );
+
+          if (!user || user.length === 0 || user[0].user_banned === '1' || user[0].user_activated === '0') {
+            continue;
+          }
+
+          // Determine tag status
+          const needsReview = user[0].user_tag_review === '1';
+          const tagStatus = needsReview ? 'pending' : 'approved';
+
+          tagValues.push([postId, uid, userId, tagStatus]);
+
+          // Create notification
+          const action = needsReview ? 'tag_review' : 'tag';
+          notificationPromises.push(
+            conn.query(
+              `INSERT INTO notifications (from_user_id, to_user_id, action, node_type, node_url, time) 
+               VALUES (?, ?, ?, 'post', ?, NOW())`,
+              [userId, uid, action, `post/${postId}`]
+            )
+          );
+        }
+
+        if (tagValues.length > 0) {
+          await conn.query(
+            `INSERT INTO posts_tags (post_id, user_id, tagged_by, tag_status) VALUES ?`,
+            [tagValues]
+          );
+
+          // Send notifications
+          await Promise.all(notificationPromises);
+        }
+      }
+
+      // 4. Hashtags extraction (existing code)
       const tags = extractHashtags(content);
-      if (tags.length) {
+         if (tags.length) {
         // 3a) Fetch existing hashtags
         const placeholders = tags.map(() => '?').join(',');
         const [existingRows] = await conn.query(
@@ -1002,98 +1357,113 @@ router.post(
         }
       }
 
-      // 4) Fetch enriched post to return (use full name as authorUsername)
+      // 5. Fetch enriched post to return
       const [rows] = await conn.query(
-        `SELECT
-           p.post_id,
-           p.user_id,
-           p.text,
-           p.time,
-           p.privacy,
-           p.shares,
-           IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
-           u.user_picture AS authorProfileImage
+        `SELECT p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares, p.has_tags, p.tags_count,
+         IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+         u.user_picture AS authorProfileImage
          FROM posts p
          JOIN users u ON u.user_id = p.user_id
          WHERE p.post_id = ?`,
         [postId]
       );
-      const post = rows[0];
 
+      const post = rows[0];
       const out = mapPostRow(post);
 
+      // Fetch media
       const [imgs] = await conn.query(
-        `SELECT source_url FROM posts_media WHERE post_id=? AND source_type='image'`,
+        `SELECT source_url FROM posts_media WHERE post_id = ? AND source_type = 'image'`,
         [postId]
       );
-      out.images = imgs.map(i => i.source_url);
+      out.images = imgs.map((i) => i.source_url);
 
-      const [vids] = await conn.query(
-        `SELECT source FROM posts_videos WHERE post_id=?`,
+      const [vids] = await conn.query(`SELECT source FROM posts_videos WHERE post_id = ?`, [postId]);
+      out.videos = vids.map((v) => v.source);
+
+      // NEW: Fetch tags for this post
+      const [postTags] = await conn.query(
+        `SELECT pt.tag_id, pt.user_id, pt.tag_status,
+         u.user_name, u.user_firstname, u.user_lastname, u.user_picture
+         FROM posts_tags pt
+         JOIN users u ON pt.user_id = u.user_id
+         WHERE pt.post_id = ? AND pt.tag_status = 'approved'`,
         [postId]
       );
-      out.videos = vids.map(v => v.source);
-      // console.log(hasMedia,wordCount,'hasMediahasMediahasMedia')
-      //Earning points section for post create 
+      out.tags = postTags;
+
+      // Points section (existing code)
      if (hasMedia || (!hasMedia && wordCount >= 400)) {
-      // console.log('inside inside inside')
-      const out1 = await creditPoints({
-        userId: userId,
-        nodeId: postId,
-        type: 'post',               // or 'post_create'
-        req,                        // so it can read req.system
-        checkActivePackage,         // your existing fn
-      });
-      console.log(out1,'out1out1out1out1')
+      console.log('inside inside inside')
+      // const out1 = await creditPoints({
+      //   userId: userId,
+      //   nodeId: postId,
+      //   type: 'post',               // or 'post_create'
+      //   req,                        // so it can read req.system
+      //   checkActivePackage,         // your existing fn
+      // });
+      // console.log(out1,'out1out1out1out1')
     }
 
-      // Earning points section for post create
-
-      if (tags && tags.length) out.hashtags = tags;
+      if (tags && tags.length) {
+        out.hashtags = tags;
+      }
 
       await conn.commit();
       res.status(201).json(out);
     } catch (err) {
       await conn.rollback();
-      console.error('[POST /posts] ', err);
-      res.status(500).json({ error: 'Failed to create post' });
+      console.error("POST /posts ", err);
+      res.status(500).json({ error: "Failed to create post" });
     } finally {
       conn.release();
     }
   }
 );
 
-// // POST /api/posts  (create a post)
-// router.post('/',
+
+// router.post(
+//   '/',
 //   ensureAuth,
 //   body('content').optional({ nullable: true }).isString(),
 //   body('media').isArray().optional(),
 //   async (req, res) => {
 //     const errors = validationResult(req);
-//     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-//     console.log(req.body,'req.bodyreq.bodyreq.bodyreq.body')
-//     const { userId, content, media = [] } = req.body;
+//     if (!errors.isEmpty())
+//       return res.status(400).json({ errors: errors.array() });
 
-//     // sanity: only author can create for themselves (unless you support page/user_type etc)
+//     const { userId, content, media = [],text='' } = req.body;
+    
+//     const hasMedia = media && media.length > 0;
+//     const wordCount = countWords(content);
+//     if(!hasMedia && wordCount < 400)
+//     {
+//       return res.status(403).json({ error: 'Without media upload not allowed to create post ' });
+//     }
+
+//     // only author can create for themselves
 //     if (String(userId) !== String(req.user.userId)) {
 //       return res.status(403).json({ error: 'Forbidden' });
 //     }
 
+//     let post_type = (text=='live' || text=='Live')?'live':'status';
+  
+    
 //     const conn = await pool.promise().getConnection();
 //     try {
 //       await conn.beginTransaction();
 
-//       // Insert post
-//       const [r] = await conn.execute(
+//       // 1) Insert post
+//       const [r] = await conn.execute( 
 //         `INSERT INTO posts
 //            (user_id, user_type, post_type, time, privacy, text, is_hidden, in_group, in_event, in_wall,
 //             reaction_like_count, comments, shares)
-//          VALUES (?, 'user', 'status', NOW(), 'public', ?, '0', '0', '0', '0', 0, 0, 0)`,
-//         [userId, content || null]
+//          VALUES (?, 'user', ?, NOW(), 'public', ?, '0', '0', '0', '0', 0, 0, 0)`,
+//         [userId, post_type,content || null]
 //       );
 //       const postId = r.insertId;
 
-//       // Attach media
+//       // 2) Attach media (images/videos)
 //       for (const m of media) {
 //         if (!m?.url || !m?.type) continue;
 //         if (m.type === 'image') {
@@ -1111,24 +1481,106 @@ router.post(
 //         }
 //       }
 
-//       // Fetch enriched post (reuse detail logic quickly)
-//       const [[post]] = await conn.query(`
-//         SELECT p.post_id, p.user_id, p.text, p.time, p.privacy, p.shares,
-//                u.user_name AS authorUsername,
-//                u.user_picture AS authorProfileImage
-//           FROM posts p
-//           JOIN users u ON u.user_id = p.user_id
-//          WHERE p.post_id = ?`, [postId]);
+//       // 3) Hashtags: extract from content, upsert, link to post
+//       const tags = extractHashtags(content);
+//       if (tags.length) {
+//         // 3a) Fetch existing hashtags
+//         const placeholders = tags.map(() => '?').join(',');
+//         const [existingRows] = await conn.query(
+//           `SELECT hashtag_id, hashtag FROM hashtags WHERE hashtag IN (${placeholders})`,
+//           tags
+//         );
+//         const existing = new Map();
+//         existingRows.forEach(row => {
+//           existing.set(String(row.hashtag).toLowerCase(), row.hashtag_id);
+//         });
+
+//         // 3b) Insert new hashtags if needed
+//         const toInsert = tags.filter(t => !existing.has(t));
+//         if (toInsert.length) {
+//           await conn.query(
+//             `INSERT INTO hashtags (hashtag) VALUES ${toInsert.map(() => '(?)').join(',')}`,
+//             toInsert
+//           );
+//           // Reselect all ids (both existing + new)
+//           const [afterIns] = await conn.query(
+//             `SELECT hashtag_id, hashtag FROM hashtags WHERE hashtag IN (${placeholders})`,
+//             tags
+//           );
+//           afterIns.forEach(row => {
+//             existing.set(String(row.hashtag).toLowerCase(), row.hashtag_id);
+//           });
+//         }
+
+//         // 3c) Link hashtags to this post (idempotent)
+//         const hashtagIds = tags
+//           .map(t => existing.get(t))
+//           .filter(id => Number.isInteger(id));
+
+//         if (hashtagIds.length) {
+//           const valuesSql = hashtagIds.map(() => '(?, ?, NOW())').join(',');
+//           const params = [];
+//           hashtagIds.forEach(hid => {
+//             params.push(postId, hid);
+//           });
+
+//           // relies on UNIQUE(post_id, hashtag_id) in hashtags_posts
+//           await conn.query(
+//             `INSERT IGNORE INTO hashtags_posts (post_id, hashtag_id, created_at)
+//              VALUES ${valuesSql}`,
+//             params
+//           );
+//         }
+//       }
+
+//       // 4) Fetch enriched post to return (use full name as authorUsername)
+//       const [rows] = await conn.query(
+//         `SELECT
+//            p.post_id,
+//            p.user_id,
+//            p.text,
+//            p.time,
+//            p.privacy,
+//            p.shares,
+//            IFNULL(NULLIF(TRIM(CONCAT_WS(' ', u.user_firstname, u.user_lastname)), ''), u.user_name) AS authorUsername,
+//            u.user_picture AS authorProfileImage
+//          FROM posts p
+//          JOIN users u ON u.user_id = p.user_id
+//          WHERE p.post_id = ?`,
+//         [postId]
+//       );
+//       const post = rows[0];
 
 //       const out = mapPostRow(post);
+
 //       const [imgs] = await conn.query(
-//         `SELECT source_url FROM posts_media WHERE post_id=? AND source_type='image'`, [postId]
+//         `SELECT source_url FROM posts_media WHERE post_id=? AND source_type='image'`,
+//         [postId]
 //       );
 //       out.images = imgs.map(i => i.source_url);
+
 //       const [vids] = await conn.query(
-//         `SELECT source FROM posts_videos WHERE post_id=?`, [postId]
+//         `SELECT source FROM posts_videos WHERE post_id=?`,
+//         [postId]
 //       );
 //       out.videos = vids.map(v => v.source);
+//       // console.log(hasMedia,wordCount,'hasMediahasMediahasMedia')
+//       //Earning points section for post create 
+//      if (hasMedia || (!hasMedia && wordCount >= 400)) {
+//       // console.log('inside inside inside')
+//       const out1 = await creditPoints({
+//         userId: userId,
+//         nodeId: postId,
+//         type: 'post',               // or 'post_create'
+//         req,                        // so it can read req.system
+//         checkActivePackage,         // your existing fn
+//       });
+//       console.log(out1,'out1out1out1out1')
+//     }
+
+//       // Earning points section for post create
+
+//       if (tags && tags.length) out.hashtags = tags;
 
 //       await conn.commit();
 //       res.status(201).json(out);
@@ -1141,6 +1593,8 @@ router.post(
 //     }
 //   }
 // );
+
+
 
 // POST /api/posts/:id/react  (toggle like)
 router.post('/:id/react',
