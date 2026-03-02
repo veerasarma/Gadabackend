@@ -552,6 +552,7 @@ router.get('/', ensureAuth, async (req, res) => {
     const livePostIds = new Set(
       rows.filter(p => String(p.post_type).toLowerCase() === 'live').map(p => p.post_id)
     );
+    
     for (const promo of promotedPosts) {
       if (String(promo.post_type).toLowerCase() === 'live') {
         livePostIds.add(promo.post_id);
@@ -1394,15 +1395,15 @@ router.post(
 
       // Points section (existing code)
      if (hasMedia || (!hasMedia && wordCount >= 400)) {
-      console.log('inside inside inside')
-      // const out1 = await creditPoints({
-      //   userId: userId,
-      //   nodeId: postId,
-      //   type: 'post',               // or 'post_create'
-      //   req,                        // so it can read req.system
-      //   checkActivePackage,         // your existing fn
-      // });
-      // console.log(out1,'out1out1out1out1')
+      // console.log('inside inside inside')
+      const out1 = await creditPoints({
+        userId: userId,
+        nodeId: postId,
+        type: 'post',               // or 'post_create'
+        req,                        // so it can read req.system
+        checkActivePackage,         // your existing fn
+      });
+      console.log(out1,'out1out1out1out1')
     }
 
       if (tags && tags.length) {
