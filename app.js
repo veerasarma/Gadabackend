@@ -135,8 +135,16 @@ app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ limit: "200mb", extended: true }));
 
 // Rate limiter (after static so assets aren't rate-limited)
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
-app.use(limiter);
+// const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
+// app.use(limiter);
+
+const globalLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5000,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(globalLimiter);
 
 // System init
 (async () => {
@@ -149,6 +157,16 @@ app.use(limiter);
   }
 })();
 app.use(initSystem);
+
+const apiUserLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  keyGenerator: (req) => (req.user?.id ? `user:${req.user.id}` : `ip:${req.ip}`),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use("/api", apiUserLimiter);
 
 // Routes
 app.use("/api/posts", postRoutes);
