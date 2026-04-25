@@ -1240,17 +1240,20 @@ router.post(
         ]
       );
       const postId = r.insertId;
+      let contentType = "writeup";
 
       // 2. Attach media
       for (const m of media || []) {
         if (!m?.url || !m?.type) continue;
         if (m.type === "image") {
+          contentType = "image";
           await conn.execute(
             `INSERT INTO posts_media (post_id, source_url, source_provider, source_type) 
              VALUES (?, ?, 'upload', 'image')`,
             [postId, m.url]
           );
         } else if (m.type === "video") {
+          contentType = "video";
           await conn.execute(
             `INSERT INTO posts_videos (post_id, category_id, source) VALUES (?, 1, ?)`,
             [postId, m.url]
@@ -1402,6 +1405,7 @@ router.post(
         type: 'post',               // or 'post_create'
         req,                        // so it can read req.system
         checkActivePackage,         // your existing fn
+        contentType
       });
       console.log(out1,'out1out1out1out1')
     }

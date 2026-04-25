@@ -134,27 +134,235 @@ async function getEarnedLastWindowFromRedisOrDb(conn, userId) {
 
 // --- Main Business Logic Function ---
 
+// async function creditPoints({
+//   userId,
+//   nodeId = 0,
+//   type,                 // 'post' | ...
+//   req = null,           // request object
+//   systemConfig = null,  // config override
+//   checkActivePackage,   // async (userId) => { active: boolean }
+// }) {
+//   if (!userId || !type) {
+//     return { ok: false, error: 'Missing required params (userId, type).' };
+//   }
+
+//   const sys = (systemConfig || (req && req.system)) || {};
+//   const windowHrs = 24; // unused, for context
+
+//   // Normalize type + map to config keys
+//   const norm = String(type).toLowerCase();
+//   const normalizedType =
+//     norm === 'post' ? 'post_create' :
+//     norm === 'posts_reactions' ? 'posts_reactions' :
+//     norm;
+
+//   const rulePoints = {
+//     post_create: Number(sys.points_per_post ?? 0),
+//     post_view: Number(sys.points_per_post_view ?? 0),
+//     post_comment: Number(sys.points_per_post_comment ?? 0),
+//     posts_reactions: Number(sys.points_per_post_like ?? (sys.points_per_post_reaction ?? 0)),
+//     follow: Number(sys.points_per_follow ?? 5),
+//     refer: Number(sys.points_per_referred ?? 5),
+//   }[normalizedType];
+
+//   if (!rulePoints || rulePoints <= 0) {
+//     return { ok: false, error: `No positive rulePoints for type=${normalizedType}` };
+//   }
+
+//   if (typeof checkActivePackage !== 'function') {
+//     return { ok: false, error: 'checkActivePackage function is required' };
+//   }
+
+//   const { active } = await checkActivePackage(userId);
+//   const baseDailyLimit = active ? sys.points_limit_pro : sys.points_limit_user;
+//   const dailyLimit = Number(baseDailyLimit ?? 1000);
+
+//   const conn = await pool.promise().getConnection();
+//   try {
+//     await conn.beginTransaction();
+
+//     // Optional idempotency for one-off actions (not for views)
+//     const isOneOff = !['post_view'].includes(normalizedType);
+//     if (isOneOff && nodeId) {
+//       const [dupe] = await conn.query(
+//         `SELECT log_id FROM log_points
+//           WHERE user_id=? AND node_id=? AND node_type=? LIMIT 1`,
+//         [userId, nodeId, normalizedType]
+//       );
+//       if (dupe.length) {
+//         await conn.rollback();
+//         conn.release();
+//         return { ok: true, awarded: 0, reason: 'duplicate', type: normalizedType };
+//       }
+//     }
+
+//     // === Check last 24h earned ===
+//    let earned;
+
+//   if (userId === '9010') {
+//     ({ earned } = await getEarnedLastWindowFromRedisOrDb(
+//       conn,
+//       userId,
+//       '2025-11-27T23:05:00Z'
+//     ));
+//   } else {
+//     ({ earned } = await getEarnedLastWindowFromRedisOrDb(conn, userId));
+//   }
+
+  
+
+//     // console.log(dailyLimit,'dailyLimit',userId);
+//     // console.log(earned,'earned',userId);
+//     const remainingToday = Math.max(0, dailyLimit - earned);
+
+//     if (remainingToday <= 0) {
+//       await conn.rollback();
+//       conn.release();
+//       return { ok: true, awarded: 0, reason: 'daily_limit_reached', remainingToday: 0, type: normalizedType };
+//     }
+
+//     const toAward = Math.min(rulePoints, remainingToday);
+
+//     // Lock user row to avoid race conditions and get current points
+//     const [userRows] = await conn.query(
+//       `SELECT user_points FROM users WHERE user_id=? FOR UPDATE`,
+//       [userId]
+//     );
+//     const currentPoints = Number(userRows[0]?.user_points || 0);
+
+//     // Insert history (log_points)
+//     // await conn.query(
+//     //   `INSERT INTO log_points (user_id, node_id, node_type, points, time)
+//     //    VALUES (?, ?, ?, ?, NOW())`,
+//     //   [userId, nodeId, normalizedType, toAward]
+//     // );
+
+//     // Update user_points
+//     await conn.query(
+//       `UPDATE users
+//           SET user_points   = COALESCE(user_points, 0)   + ?,
+//               points_earned = '1'
+//         WHERE user_id = ?`,
+//       [toAward, userId]
+//     );
+
+//     await conn.commit();
+//     conn.release();
+
+//     // === After successful commit: update Redis 24h bucket for this user ===
+//     try {
+//       const key = `user:${userId}:points24h`;
+//       const exists = await redisClient.exists(key);
+//       if (exists) {
+//         await redisClient.incrby(key, toAward);
+//         // Optionally: leave TTL unchanged, so counter auto-resets after first activity in the window
+//       } else {
+//         // Key missing: repopulate sum from DB plus award, set TTL
+//         const sinceDate = new Date(Date.now() - 24 * 3600 * 1000);
+//         const sinceSql = sinceDate.toISOString().slice(0, 19).replace('T', ' ');
+//         const sql = `
+//           SELECT COALESCE(SUM(points),0) AS s
+//           FROM log_points
+//           WHERE user_id = ?
+//             AND time >= ?
+//         `;
+//         let total = toAward;
+//         try {
+//           const [rows] = await pool.promise().query(sql, [userId, sinceSql]);
+//           total = Number(rows[0]?.s || 0) + toAward;
+//         } catch (err) {}
+//         await redisClient.set(key, total, 'EX', 24 * 3600);
+//       }
+//     } catch (redisErr) {
+//       // Do not fail the whole operation if Redis is down; just log
+//       console.error('Redis update failed for user', userId, redisErr);
+//     }
+
+//     return {
+//       ok: true,
+//       type: normalizedType,
+//       awarded: toAward,
+//       remainingToday: Math.max(0, remainingToday - toAward),
+//       balances: { points: currentPoints + toAward },
+//     };
+//   } catch (err) {
+//     await conn.rollback();
+//     conn.release();
+//     return { ok: false, error: err.message || String(err) };
+//   }
+// }
+
 async function creditPoints({
   userId,
   nodeId = 0,
-  type,                 // 'post' | ...
-  req = null,           // request object
-  systemConfig = null,  // config override
-  checkActivePackage,   // async (userId) => { active: boolean }
+  type,                  // 'post' | 'post_view' | 'post_comment' | 'posts_reactions' | ...
+  req = null,            // request object
+  systemConfig = null,   // config override
+  checkActivePackage,    // async (userId) => { active: boolean }
+  contentType = null,    // optional override: 'writeup' | 'picture' | 'video'
 }) {
   if (!userId || !type) {
     return { ok: false, error: 'Missing required params (userId, type).' };
   }
 
-  const sys = (systemConfig || (req && req.system)) || {};
-  const windowHrs = 24; // unused, for context
+  // Only users with userId <= 48122 can earn points
+  const numericUserId = Number(userId);
+  if (!Number.isFinite(numericUserId)) {
+    return { ok: false, error: 'Invalid userId' };
+  }
+  if (numericUserId > 48122) {
+    return {
+      ok: true,
+      awarded: 0,
+      reason: 'user_not_eligible',
+      type: String(type).toLowerCase(),
+    };
+  }
 
-  // Normalize type + map to config keys
+  const sys = (systemConfig || (req && req.system)) || {};
+
+  // Normalize action type
   const norm = String(type).toLowerCase();
   const normalizedType =
     norm === 'post' ? 'post_create' :
     norm === 'posts_reactions' ? 'posts_reactions' :
     norm;
+
+  // Detect content kind
+  const rawContentType =
+    contentType ??
+    req?.body?.contentType ??
+    req?.body?.postType ??
+    req?.body?.type_of_post ??
+    req?.contentType ??
+    req?.postType ??
+    req?.type_of_post ??
+    null;
+
+  const c = String(rawContentType || 'writeup').toLowerCase();
+
+  const normalizedContentType =
+    ['writeup', 'text', 'article'].includes(c) ? 'writeup' :
+    ['picture', 'pictures', 'image', 'images', 'photo', 'photos'].includes(c) ? 'picture' :
+    ['video', 'videos'].includes(c) ? 'video' :
+    'writeup';
+
+  // Allowed actions by content type
+  const allowedActionsByContentType = {
+    writeup: new Set(['post_create', 'posts_reactions']),
+    picture: new Set(['post_create', 'posts_reactions']),
+    video: new Set(['post_create', 'posts_reactions', 'post_view', 'post_comment']),
+  };
+
+  if (!allowedActionsByContentType[normalizedContentType].has(normalizedType)) {
+    return {
+      ok: true,
+      awarded: 0,
+      reason: 'action_not_eligible_for_content_type',
+      contentType: normalizedContentType,
+      type: normalizedType,
+    };
+  }
 
   const rulePoints = {
     post_create: Number(sys.points_per_post ?? 0),
@@ -178,117 +386,135 @@ async function creditPoints({
   const dailyLimit = Number(baseDailyLimit ?? 1000);
 
   const conn = await pool.promise().getConnection();
+
   try {
     await conn.beginTransaction();
 
-    // Optional idempotency for one-off actions (not for views)
+    // One-off actions should not be credited twice for the same node
+    // Views are intentionally excluded from duplicate check
     const isOneOff = !['post_view'].includes(normalizedType);
+
     if (isOneOff && nodeId) {
       const [dupe] = await conn.query(
-        `SELECT log_id FROM log_points
-          WHERE user_id=? AND node_id=? AND node_type=? LIMIT 1`,
+        `SELECT log_id
+         FROM log_points
+         WHERE user_id=? AND node_id=? AND node_type=?
+         LIMIT 1`,
         [userId, nodeId, normalizedType]
       );
+
       if (dupe.length) {
         await conn.rollback();
-        conn.release();
-        return { ok: true, awarded: 0, reason: 'duplicate', type: normalizedType };
+        return {
+          ok: true,
+          awarded: 0,
+          reason: 'duplicate',
+          contentType: normalizedContentType,
+          type: normalizedType,
+        };
       }
     }
 
-    // === Check last 24h earned ===
-   let earned;
+    // Check earned points in last 24h
+    let earned;
 
-  if (userId === '9010') {
-    ({ earned } = await getEarnedLastWindowFromRedisOrDb(
-      conn,
-      userId,
-      '2025-11-27T23:05:00Z'
-    ));
-  } else {
-    ({ earned } = await getEarnedLastWindowFromRedisOrDb(conn, userId));
-  }
+    if (String(userId) === '9010') {
+      ({ earned } = await getEarnedLastWindowFromRedisOrDb(
+        conn,
+        userId,
+        '2025-11-27T23:05:00Z'
+      ));
+    } else {
+      ({ earned } = await getEarnedLastWindowFromRedisOrDb(conn, userId));
+    }
 
-  
-
-    // console.log(dailyLimit,'dailyLimit',userId);
-    // console.log(earned,'earned',userId);
     const remainingToday = Math.max(0, dailyLimit - earned);
 
     if (remainingToday <= 0) {
       await conn.rollback();
-      conn.release();
-      return { ok: true, awarded: 0, reason: 'daily_limit_reached', remainingToday: 0, type: normalizedType };
+      return {
+        ok: true,
+        awarded: 0,
+        reason: 'daily_limit_reached',
+        remainingToday: 0,
+        contentType: normalizedContentType,
+        type: normalizedType,
+      };
     }
 
     const toAward = Math.min(rulePoints, remainingToday);
 
-    // Lock user row to avoid race conditions and get current points
+    // Lock user row to avoid race conditions
     const [userRows] = await conn.query(
       `SELECT user_points FROM users WHERE user_id=? FOR UPDATE`,
       [userId]
     );
     const currentPoints = Number(userRows[0]?.user_points || 0);
 
-    // Insert history (log_points)
-    // await conn.query(
-    //   `INSERT INTO log_points (user_id, node_id, node_type, points, time)
-    //    VALUES (?, ?, ?, ?, NOW())`,
-    //   [userId, nodeId, normalizedType, toAward]
-    // );
+    // Insert history
+    await conn.query(
+      `INSERT INTO log_points (user_id, node_id, node_type, points, time)
+       VALUES (?, ?, ?, ?, NOW())`,
+      [userId, nodeId, normalizedType, toAward]
+    );
 
-    // Update user_points
+    // Update user points
     await conn.query(
       `UPDATE users
-          SET user_points   = COALESCE(user_points, 0)   + ?,
+          SET user_points   = COALESCE(user_points, 0) + ?,
               points_earned = '1'
         WHERE user_id = ?`,
       [toAward, userId]
     );
 
     await conn.commit();
-    conn.release();
 
-    // === After successful commit: update Redis 24h bucket for this user ===
+    // Update Redis cache after successful commit
     try {
       const key = `user:${userId}:points24h`;
       const exists = await redisClient.exists(key);
+
       if (exists) {
         await redisClient.incrby(key, toAward);
-        // Optionally: leave TTL unchanged, so counter auto-resets after first activity in the window
       } else {
-        // Key missing: repopulate sum from DB plus award, set TTL
         const sinceDate = new Date(Date.now() - 24 * 3600 * 1000);
         const sinceSql = sinceDate.toISOString().slice(0, 19).replace('T', ' ');
         const sql = `
-          SELECT COALESCE(SUM(points),0) AS s
+          SELECT COALESCE(SUM(points), 0) AS s
           FROM log_points
           WHERE user_id = ?
             AND time >= ?
         `;
+
         let total = toAward;
+
         try {
           const [rows] = await pool.promise().query(sql, [userId, sinceSql]);
-          total = Number(rows[0]?.s || 0) + toAward;
+          total = Number(rows[0]?.s || 0);
         } catch (err) {}
+
         await redisClient.set(key, total, 'EX', 24 * 3600);
       }
     } catch (redisErr) {
-      // Do not fail the whole operation if Redis is down; just log
       console.error('Redis update failed for user', userId, redisErr);
     }
 
     return {
       ok: true,
+      contentType: normalizedContentType,
       type: normalizedType,
       awarded: toAward,
       remainingToday: Math.max(0, remainingToday - toAward),
       balances: { points: currentPoints + toAward },
     };
   } catch (err) {
-    await conn.rollback();
-    conn.release();
+    try {
+      await conn.rollback();
+    } catch (_) {}
+
     return { ok: false, error: err.message || String(err) };
+  } finally {
+    conn.release();
   }
 }
 
