@@ -1226,34 +1226,48 @@ router.post(
     try {
       await conn.beginTransaction();
 
+      const normalizedMedia = (media || []).filter((m) => m?.url && m?.type);
+
+      const hasVideo = normalizedMedia.some((m) =>
+      ["video", "videos"].includes(String(m.type).toLowerCase())
+      );
+
+      const hasImage = normalizedMedia.some((m) =>
+      ["image", "images", "photo", "picture"].includes(String(m.type).toLowerCase())
+      );
+
+      const contentType = hasVideo ? "video" : hasImage ? "image" : "writeup";
+
+
       // 1. Insert post
       const [r] = await conn.execute(
         `INSERT INTO posts (user_id, user_type, post_type, time, privacy, text, is_hidden, 
-         in_group, in_event, in_wall, reaction_like_count, comments, shares, has_tags, tags_count) 
-         VALUES (?, 'user', ?, NOW(), 'public', ?, '0', '0', '0', '0', 0, 0, 0, ?, ?)`,
+         in_group, in_event, in_wall, reaction_like_count, comments, shares, has_tags, tags_count,content_type) 
+         VALUES (?, 'user', ?, NOW(), 'public', ?, '0', '0', '0', '0', 0, 0, 0, ?, ?,?)`,
         [
           userId, 
           posttype, 
           content || null,
           taggedUsers && taggedUsers.length > 0 ? '1' : '0', // has_tags
-          taggedUsers ? taggedUsers.length : 0 // tags_count
+          taggedUsers ? taggedUsers.length : 0, // tags_count
+          contentType
         ]
       );
       const postId = r.insertId;
-      let contentType = "writeup";
+      // let contentType = "writeup";
 
       // 2. Attach media
       for (const m of media || []) {
         if (!m?.url || !m?.type) continue;
         if (m.type === "image") {
-          contentType = "image";
+          // contentType = "image";
           await conn.execute(
             `INSERT INTO posts_media (post_id, source_url, source_provider, source_type) 
              VALUES (?, ?, 'upload', 'image')`,
             [postId, m.url]
           );
         } else if (m.type === "video") {
-          contentType = "video";
+          // contentType = "video";
           await conn.execute(
             `INSERT INTO posts_videos (post_id, category_id, source) VALUES (?, 1, ?)`,
             [postId, m.url]

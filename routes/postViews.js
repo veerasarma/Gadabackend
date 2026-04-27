@@ -21,7 +21,7 @@ async function handleSingleView({ req, postId, viewerId }) {
 
     // 1) Find author
     const [[post]] = await conn.query(
-      'SELECT user_id AS authorId FROM posts WHERE post_id = ? LIMIT 1',
+      'SELECT user_id AS authorId,content_type FROM posts WHERE post_id = ? LIMIT 1',
       [postId]
     );
     if (!post) {
@@ -30,6 +30,7 @@ async function handleSingleView({ req, postId, viewerId }) {
       return { ok: false, status: 404, error: 'Post not found' };
     }
     const authorId = Number(post.authorId);
+    const content_type = Number(post.content_type);
 
     // 2) Skip self-views
     if (authorId === Number(viewerId)) {
@@ -78,6 +79,7 @@ async function handleSingleView({ req, postId, viewerId }) {
         type: 'post_view',         // uses sys.points_per_post_view
         req,
         checkActivePackage,
+        content_type
       });
       return { ok: true, awarded: award?.awarded || 0, reason: award?.reason || 'ok' };
     } catch (e) {

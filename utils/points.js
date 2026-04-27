@@ -340,7 +340,7 @@ async function creditPoints({
     null;
 
   const c = String(rawContentType || 'writeup').toLowerCase();
-  
+  console.log(c,'ccc')
   const normalizedContentType =
     ['writeup', 'text', 'article'].includes(c) ? 'writeup' :
     ['picture', 'pictures', 'image', 'images', 'photo', 'photos'].includes(c) ? 'picture' :
