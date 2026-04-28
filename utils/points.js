@@ -304,7 +304,9 @@ async function creditPoints({
   if (!userId || !type) {
     return { ok: false, error: 'Missing required params (userId, type).' };
   }
-  // console.log(type,contentType,'contentTypecontentTypecontentType')
+   if (String(userId) === '9010') {
+  console.log(type,contentType,'contentTypecontentTypecontentType')
+   }
   // Only users with userId <= 48122 can earn points
   const numericUserId = Number(userId);
   if (!Number.isFinite(numericUserId)) {
