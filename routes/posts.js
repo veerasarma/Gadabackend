@@ -115,6 +115,7 @@ async function handleSingleView({ req, postId, viewerId }) {
         type: 'post_view',         // uses sys.points_per_post_view
         req,
         checkActivePackage,
+        content_type
       });
       return { ok: true, awarded: award?.awarded || 0, reason: award?.reason || 'ok' };
     } catch (e) {
