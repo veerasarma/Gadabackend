@@ -304,7 +304,7 @@ async function creditPoints({
   if (!userId || !type) {
     return { ok: false, error: 'Missing required params (userId, type).' };
   }
-
+  // console.log(type,contentType,'contentTypecontentTypecontentType')
   // Only users with userId <= 48122 can earn points
   const numericUserId = Number(userId);
   if (!Number.isFinite(numericUserId)) {
@@ -340,7 +340,7 @@ async function creditPoints({
     null;
 
   const c = String(rawContentType || 'writeup').toLowerCase();
-  console.log(c,'ccc')
+  // console.log(c,'ccc')
   const normalizedContentType =
     ['writeup', 'text', 'article'].includes(c) ? 'writeup' :
     ['picture', 'pictures', 'image', 'images', 'photo', 'photos'].includes(c) ? 'picture' :

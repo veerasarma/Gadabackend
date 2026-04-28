@@ -45,8 +45,19 @@ async function handleSingleView({ req, postId, viewerId }) {
     await conn.beginTransaction();
 
     // 1) Find author
-    const [[post]] = await conn.query(
-      'SELECT user_id AS authorId FROM posts WHERE post_id = ? LIMIT 1',
+    // const [[post]] = await conn.query(
+    //   'SELECT user_id AS authorId FROM posts WHERE post_id = ? LIMIT 1',
+    //   [postId]
+    // );
+    // if (!post) {
+    //   await conn.rollback();
+    //   conn.release();
+    //   return { ok: false, status: 404, error: 'Post not found' };
+    // }
+    // const authorId = Number(post.authorId);
+
+     const [[post]] = await conn.query(
+      'SELECT user_id AS authorId,content_type FROM posts WHERE post_id = ? LIMIT 1',
       [postId]
     );
     if (!post) {
@@ -55,6 +66,7 @@ async function handleSingleView({ req, postId, viewerId }) {
       return { ok: false, status: 404, error: 'Post not found' };
     }
     const authorId = Number(post.authorId);
+    const content_type = Number(post.content_type);
 
     // 2) Skip self-views
     if (authorId === Number(viewerId)) {
