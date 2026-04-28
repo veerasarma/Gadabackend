@@ -123,6 +123,7 @@ async function handleSingleView({ req, postId, viewerId }) {
       return { ok: true, awarded: 0, reason: 'points_error' };
     }
   } catch (err) {
+    console.log(err,'handleviewerror')
     await conn.rollback();
     conn.release();
     return { ok: false, status: 500, error: err.message || String(err) };
