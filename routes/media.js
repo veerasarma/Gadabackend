@@ -186,9 +186,9 @@ const upload = multer({
 async function uploadToR2(file) {
   const relativePath = getRelativePath(file);
   
-  console.log(`📤 Uploading to R2: ${relativePath}`);
-  console.log(`   Size: ${(file.buffer.length / 1024 / 1024).toFixed(2)} MB`);
-  console.log(`   Type: ${file.mimetype}`);
+  // console.log(`📤 Uploading to R2: ${relativePath}`);
+  // console.log(`   Size: ${(file.buffer.length / 1024 / 1024).toFixed(2)} MB`);
+  // console.log(`   Type: ${file.mimetype}`);
 
   const putCmd = new PutObjectCommand({
     Bucket: R2_BUCKET,
