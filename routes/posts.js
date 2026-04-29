@@ -60,16 +60,19 @@ async function handleSingleView({ req, postId, viewerId }) {
       'SELECT user_id AS authorId,content_type FROM posts WHERE post_id = ? LIMIT 1',
       [postId]
     );
+   
     if (!post) {
+      console.log("without post",postId,authorId)
       await conn.rollback();
       conn.release();
       return { ok: false, status: 404, error: 'Post not found' };
     }
     const authorId = Number(post.authorId);
-    const content_type = Number(post.content_type);
-
+    const content_type = post.content_type;
+    
     // 2) Skip self-views
     if (authorId === Number(viewerId)) {
+      
       await conn.rollback();
       conn.release();
       return { ok: true, awarded: 0, reason: 'self_view' };
@@ -87,18 +90,18 @@ async function handleSingleView({ req, postId, viewerId }) {
       conn.release();
       return { ok: true, awarded: 0, reason: 'dedup_window' };
     }
-
+  
     // 4) Insert a view event (gives us a unique id to use as nodeId)
     const [ins] = await conn.query(
       `INSERT INTO post_view_events (post_id, viewer_id, time)
        VALUES (?, ?, NOW())`,
       [postId, viewerId]
     );
-   
+  
     const [ins1] = await conn.query(
       `INSERT INTO posts_views (post_id, user_id, view_date)
        VALUES (?, ?, NOW())`,
-      [postId, viewerId]
+      [postId, authorId]
     );
     const viewEventId = ins.insertId;
 
@@ -108,6 +111,8 @@ async function handleSingleView({ req, postId, viewerId }) {
     // 5) Credit the AUTHOR (not the viewer) for the view
     //    Uses your creditPoints helper (daily limit enforced there).
     try {
+// console.log("creditPoints",postId,authorId,viewEventId);
+// console.log(authorId,viewEventId,content_type);
       const award = await creditPoints({
         pool,
         userId: authorId,          // credit goes to post author
@@ -115,7 +120,7 @@ async function handleSingleView({ req, postId, viewerId }) {
         type: 'post_view',         // uses sys.points_per_post_view
         req,
         checkActivePackage,
-        content_type
+        contentType:content_type
       });
       return { ok: true, awarded: award?.awarded || 0, reason: award?.reason || 'ok' };
     } catch (e) {
