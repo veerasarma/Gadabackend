@@ -201,7 +201,7 @@ async function uploadToR2(file) {
   const result = await r2Client.send(putCmd);
   const uploadTime = Date.now() - startTime;
 
-  console.log(`✅ Uploaded in ${uploadTime}ms, ETag: ${result.ETag}`);
+  // console.log(`✅ Uploaded in ${uploadTime}ms, ETag: ${result.ETag}`);
 
   return {
     relativePath,
@@ -231,7 +231,7 @@ router.post('/upload', ensureAuth, (req, res) => {
         return res.status(400).json({ error: 'No files received' });
       }
 
-      console.log(`📦 Processing ${files.length} file(s)`);
+      // console.log(`📦 Processing ${files.length} file(s)`);
 
       // Upload all files to R2 in parallel
       const uploadPromises = files.map(file => uploadToR2(file));
@@ -245,7 +245,7 @@ router.post('/upload', ensureAuth, (req, res) => {
         .filter(r => r.publicUrl)
         .map(r => r.publicUrl);
 
-      console.log(`✅ Successfully uploaded ${urls.length} file(s)\n`);
+      // console.log(`✅ Successfully uploaded ${urls.length} file(s)\n`);
 
       return res.json({
         urls,           // relative paths like /uploads/photos/2026/02/file_123.jpg

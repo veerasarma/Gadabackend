@@ -1440,7 +1440,7 @@ router.post(
         checkActivePackage,         // your existing fn
         contentType
       });
-      console.log(out1,'out1out1out1out1')
+      // console.log(out1,'out1out1out1out1')
     }
 
       if (tags && tags.length) {
@@ -1700,9 +1700,9 @@ router.post('/:id/react',
             meta: { id },
           };
     
-          console.log("notification section1111")
+          // console.log("notification section1111")
           if (createNotification) {
-            console.log("notification section")
+            // console.log("notification section")
             // Use your service (emits socket + returns enriched row)
             createNotification(payload).catch(err =>
               console.error('[notif] post_like helper failed', err)
@@ -1839,7 +1839,7 @@ router.post('/:id/comment',
         req,                        // so it can read req.system
         checkActivePackage,         // your existing fn
       });
-      console.log(out1,'out1out1out1out1')
+      // console.log(out1,'out1out1out1out1')
     }
 
       // Earning points section for post create

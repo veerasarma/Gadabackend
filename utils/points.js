@@ -301,12 +301,13 @@ async function creditPoints({
   checkActivePackage,    // async (userId) => { active: boolean }
   contentType = null,    // optional override: 'writeup' | 'picture' | 'video'
 }) {
+  
   if (!userId || !type) {
     return { ok: false, error: 'Missing required params (userId, type).' };
   }
-   if (String(userId) === '9010') {
-  console.log(type,contentType,'contentTypecontentTypecontentType')
-   }
+  //  if (String(userId) === '9010') {
+  console.log(type,contentType,userId,'contentTypecontentTypecontentType')
+  //  }
   // Only users with userId <= 48122 can earn points
   const numericUserId = Number(userId);
   if (!Number.isFinite(numericUserId)) {
@@ -355,8 +356,9 @@ async function creditPoints({
     picture: new Set(['post_create', 'posts_reactions']),
     video: new Set(['post_create', 'posts_reactions', 'post_view', 'post_comment']),
   };
-
+  // console.log(allowedActionsByContentType,normalizedType)
   if (!allowedActionsByContentType[normalizedContentType].has(normalizedType)) {
+    // console.log('inside allowedActionsByContentType if')
     return {
       ok: true,
       awarded: 0,
@@ -510,6 +512,7 @@ async function creditPoints({
       balances: { points: currentPoints + toAward },
     };
   } catch (err) {
+    console.log(err,'errerrerrerr')
     try {
       await conn.rollback();
     } catch (_) {}
