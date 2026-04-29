@@ -212,7 +212,7 @@ async function uploadToR2(file) {
 
 // ------------- Upload Route -------------
 router.post('/upload', ensureAuth, (req, res) => {
-  console.log('\n🚀 /upload route hit');
+  // console.log('\n🚀 /upload route hit');
   
   upload.array('files', 5)(req, res, async (err) => {
     if (err instanceof multer.MulterError) {

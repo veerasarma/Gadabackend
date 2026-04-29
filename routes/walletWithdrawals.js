@@ -205,7 +205,7 @@ router.get("/admin", ensureAuth, requireAdmin,async (req, res) => {
   }
 });
 
-router.post("/:id/cancel", ensureAuth,requireAdmin, async (req, res) => {
+router.post("/:id/cancel", ensureAuth, async (req, res) => {
 //   if (!isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
   const id = Number(req.params.id);
