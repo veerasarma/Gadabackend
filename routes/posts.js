@@ -1185,7 +1185,7 @@ router.get('/:id',
           out.images.unshift(liveThumbToInject);
         }
       }
-      console.log(liveSummary,'liveSummaryliveSummary')
+      // console.log(liveSummary,'liveSummaryliveSummary')
       // expose summary to the client
       out.live = liveSummary;
 

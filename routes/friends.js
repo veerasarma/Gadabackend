@@ -114,7 +114,7 @@ router.put('/requests/:id', ensureAuth, async (req, res) => {
     if (fr.status !== 0) {
       return res.status(409).json({ error: `Already ${fr.status}` });
     }
-    console.log(action,'actionaction')
+    // console.log(action,'actionaction')
     await pool.query(`UPDATE friends SET status=? WHERE id=?`, [action=='accepted'?1:0, reqId]);
     // No separate user_friends table; accepted rows represent friendships
     res.json({ id: reqId, status: action });
